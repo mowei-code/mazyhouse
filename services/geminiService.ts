@@ -75,25 +75,35 @@ const valuationSchema = {
   required: ['estimatedPrice', 'pricePerSqm', 'priceTrend', 'pros', 'cons', 'marketSummary', 'confidence', 'amenitiesAnalysis'],
 };
 
-export async function getValuation(property: Property): Promise<ValuationReport> {
+export async function getValuation(property: Property, nearbyProperties: Property[]): Promise<ValuationReport> {
+  const nearbyPropertiesContext = nearbyProperties.length > 0
+    ? nearbyProperties.map(p => 
+        `- 地址: ${p.address}, 總價: ${Math.round(p.price / 10000)}萬, 坪數: ${(p.size / 3.30579).toFixed(1)}坪, 屋齡: ${new Date().getFullYear() - p.yearBuilt}年, 交易日期: ${p.transactionDate || '近期'}`
+      ).join('\n')
+    : '無可用的附近交易資料。';
+
   const prompt = `
-    您是一位專業的台灣房地產分析師。請根據以下房產資訊，提供一份詳細的估價報告。
+    您是一位專業的台灣房地產分析師。請根據以下房產資訊，並**高度參考**我們提供的「附近實價登錄資料」，提供一份詳細且盡量貼近市場行情的估價報告。估價應反映真實的市場交易價值。
     請嚴格遵守提供的 JSON schema 格式進行回覆。
 
-    房產資訊:
+    **主要評估房產資訊:**
     - 地址: ${property.address}
     - 類型: ${property.type}
     - 坪數: ${Math.round(property.size / 3.30579)} 坪 (${property.size} 平方公尺)
     - 格局: ${property.bedrooms} 房 / ${property.bathrooms} 衛
     - 屋齡: ${new Date().getFullYear() - property.yearBuilt} 年 (建於 ${property.yearBuilt} 年)
+    - 樓層: ${property.floor}
 
-    請分析此房產的價值，並提供以下資訊：
-    1.  **估計總價 (estimatedPrice)**: 新台幣。
+    **附近實價登錄資料 (重要參考):**
+${nearbyPropertiesContext}
+
+    請基於以上所有資訊，進行綜合分析後，提供以下資訊：
+    1.  **估計總價 (estimatedPrice)**: 新台幣。請確保此價格反映了附近相似房產的成交行情，並根據主要評估房產的條件（屋齡、樓層、格局等）進行合理調整。
     2.  **每坪單價 (pricePerSqm)**: 請換算成每平方公尺的價格後填入。
     3.  **房價趨勢 (priceTrend)**: 提供過去10年，每半年一個數據點的價格趨勢 (共20個點)。label 格式為 "YYYY H1" 或 "YYYY H2"，例如 "2023 H1"。
     4.  **優點 (pros)**: 列出3個主要優點。
     5.  **缺點 (cons)**: 列出3個主要缺點。
-    6.  **市場總結 (marketSummary)**: 一段約100字的市場分析。
+    6.  **市場總結 (marketSummary)**: 一段約100字的市場分析，說明您的估價依據，特別是與周邊行情的比較。
     7.  **信心指數 (confidence)**: "高"、"中" 或 "低"。
     8.  **周邊機能分析 (amenitiesAnalysis)**: 分析房產周邊的生活機能，分別列出：
         - **學校 (schools)**: 附近的著名學校或學區。

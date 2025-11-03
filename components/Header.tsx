@@ -8,7 +8,7 @@ export const Header: React.FC = () => {
         <div className="bg-blue-600 p-2 rounded-lg">
           <BuildingOfficeIcon className="h-6 w-6 text-white" />
         </div>
-        <h1 className="text-xl font-bold text-slate-800">迷宮AI 房產估價師</h1>
+        <h1 className="text-xl font-bold text-slate-800">AI 房產估價師</h1>
       </div>
     </header>
   );
