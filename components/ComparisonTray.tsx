@@ -1,0 +1,69 @@
+import React from 'react';
+import type { Property } from '../types';
+import { XCircleIcon } from './icons/XCircleIcon';
+import { ScaleIcon } from './icons/ScaleIcon';
+
+interface ComparisonTrayProps {
+  properties: Property[];
+  onCompare: () => void;
+  onRemove: (property: Property) => void;
+  onClear: () => void;
+}
+
+export const ComparisonTray: React.FC<ComparisonTrayProps> = ({ properties, onCompare, onRemove, onClear }) => {
+  return (
+    <div className="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-sm border-t border-slate-200 shadow-2xl z-20 transition-transform duration-300 animate-slide-up">
+      <div className="container mx-auto px-4 py-3">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <h4 className="text-sm font-bold text-slate-700 hidden sm:block">比較清單</h4>
+            <div className="flex items-center gap-2">
+              {properties.map(prop => (
+                <div key={prop.id} className="relative group">
+                  <img src={prop.imageUrl} alt={prop.address} className="h-12 w-12 rounded-md object-cover border-2 border-slate-300"/>
+                  <button 
+                    onClick={() => onRemove(prop)}
+                    className="absolute -top-2 -right-2 bg-white rounded-full text-slate-500 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                    title="移除"
+                  >
+                    <XCircleIcon className="h-5 w-5" />
+                  </button>
+                </div>
+              ))}
+              {properties.length < 4 && Array.from({ length: 4 - properties.length }).map((_, index) => (
+                <div key={`placeholder-${index}`} className="h-12 w-12 rounded-md bg-slate-200 border-2 border-dashed border-slate-300 flex items-center justify-center">
+                  <span className="text-slate-400 text-lg font-medium">?</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+             <button
+              onClick={onClear}
+              className="text-sm font-medium text-slate-600 hover:text-red-600 transition-colors"
+            >
+              全部清除
+            </button>
+            <button
+              onClick={onCompare}
+              disabled={properties.length < 2}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 disabled:bg-slate-400 disabled:cursor-not-allowed transition-all"
+            >
+              <ScaleIcon className="h-5 w-5"/>
+              <span>比較 ({properties.length})</span>
+            </button>
+          </div>
+        </div>
+      </div>
+      <style>{`
+        @keyframes slide-up {
+          from { transform: translateY(100%); }
+          to { transform: translateY(0); }
+        }
+        .animate-slide-up {
+          animation: slide-up 0.3s ease-out forwards;
+        }
+      `}</style>
+    </div>
+  );
+};

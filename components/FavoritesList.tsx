@@ -15,10 +15,12 @@ interface PropertyListProps {
   onToggleFavorite: (property: Property) => void;
   onFilterChange: (name: string, value: string) => void;
   onClearFilters: () => void;
+  comparisonList: Property[];
+  onToggleCompare: (property: Property) => void;
 }
 
 
-export const FavoritesList: React.FC<PropertyListProps> = ({ properties, favorites, filters, onSelectProperty, onToggleFavorite, onFilterChange, onClearFilters }) => {
+export const FavoritesList: React.FC<PropertyListProps> = ({ properties, favorites, filters, onSelectProperty, onToggleFavorite, onFilterChange, onClearFilters, comparisonList, onToggleCompare }) => {
   const [view, setView] = useState<'all' | 'favorites'>('all');
   
   const handleFilterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -159,6 +161,8 @@ export const FavoritesList: React.FC<PropertyListProps> = ({ properties, favorit
                 onSelect={onSelectProperty}
                 onToggleFavorite={onToggleFavorite}
                 isFavorite={favorites.some(fav => fav.id === property.id)}
+                isInCompareList={comparisonList.some(p => p.id === property.id)}
+                onToggleCompare={onToggleCompare}
               />
             ))}
           </div>

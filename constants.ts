@@ -3,7 +3,7 @@ import type { Property, Filters } from './types';
 export const mockProperties: Property[] = [
   {
     id: 'prop1',
-    address: '台北市大安區古莊里羅斯福路二段79-1號',
+    address: '台北市大安區羅斯福路二段79之1號',
     district: '大安區',
     type: '華廈',
     price: 25000000,

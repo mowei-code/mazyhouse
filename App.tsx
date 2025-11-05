@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import type { Property, ValuationReport, Filters } from './types';
+import type { Property, ValuationReport, Filters, ComparisonValuationState } from './types';
 import { getValuation } from './services/geminiService';
 import { SearchForm } from './components/SearchForm';
 import { ValuationReportDisplay } from './components/ValuationReportDisplay';
@@ -8,6 +8,20 @@ import { Header } from './components/Header';
 import { mockProperties, initialFilters } from './constants';
 import { MapView } from './components/MapView';
 import { RecentSearchesList } from './components/RecentSearchesList';
+import { ComparisonTray } from './components/ComparisonTray';
+import { ComparisonView } from './components/ComparisonView';
+import { sanitizeAddressForGeocoding } from './utils';
+
+// Define a more neutral fallback property to avoid biasing towards Taipei prices.
+const defaultPropertyData = {
+  price: 15000000,
+  size: 85,
+  yearBuilt: 2005,
+  type: '華廈' as const,
+  bedrooms: 3,
+  bathrooms: 2,
+  floor: '7樓 / 15樓',
+};
 
 // Helper function to generate mock nearby properties for context
 const generateNearbyProperties = (baseProperty: Property, count: number): Property[] => {
@@ -16,7 +30,7 @@ const generateNearbyProperties = (baseProperty: Property, count: number): Proper
   
   // Use a fallback if the base property is a new one without complete data
   if (!propertySource.price || propertySource.price === 0) {
-      const fallback = mockProperties.find(p => p.district === propertySource.district) || mockProperties[0];
+      const fallback = mockProperties.find(p => p.district === propertySource.district) || defaultPropertyData;
       propertySource = { ...propertySource, price: fallback.price, size: fallback.size, yearBuilt: fallback.yearBuilt, type: fallback.type, bedrooms: fallback.bedrooms, bathrooms: fallback.bathrooms, floor: fallback.floor };
   }
 
@@ -95,6 +109,9 @@ const App: React.FC = () => {
   const [isValuating, setIsValuating] = useState(false);
   const [transactionList, setTransactionList] = useState<Property[]>([]);
   const [filters, setFilters] = useState<Filters>(initialFilters);
+  const [comparisonList, setComparisonList] = useState<Property[]>([]);
+  const [comparisonValuations, setComparisonValuations] = useState<Record<string, ComparisonValuationState>>({});
+  const [isComparing, setIsComparing] = useState(false);
 
   useEffect(() => {
     try {
@@ -125,54 +142,105 @@ const App: React.FC = () => {
     setFilters(initialFilters);
   }, []);
   
-  const handleSearch = useCallback(async (address: string) => {
+  const handleSearch = useCallback(async (
+    address: string,
+    reference: string,
+    details?: { coords: { lat: number; lon: number }; district: string }
+  ) => {
     setError(null);
     setValuation(null);
     setIsValuating(true);
     setIsLoading(true);
 
-    let propertyToValuate: Property | null = mockProperties.find(p => 
-      p.address.toLowerCase().includes(address.toLowerCase())
-    ) || null;
-
-    if (!propertyToValuate && address) {
-      try {
-        const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address + ' 台灣')}&countrycodes=tw`);
-        if (!response.ok) throw new Error('Geocoding service failed');
-        const data = await response.json();
-
-        if (data && data.length > 0) {
-          const { lat, lon, display_name } = data[0];
-          const baseProperty = mockProperties[Math.floor(Math.random() * mockProperties.length)];
-          const floor = Math.floor(Math.random() * 15) + 1;
-          const totalFloors = floor + Math.floor(Math.random() * 10);
-          propertyToValuate = {
-            ...baseProperty,
-            id: `prop_${Date.now()}`,
-            address: display_name, // Use the more complete address from geocoding
-            latitude: parseFloat(lat),
-            longitude: parseFloat(lon),
-            floor: `${floor}樓 / ${totalFloors}樓`,
-          };
-        } else {
-          throw new Error('地址無法定位。請嘗試輸入更完整的地址，例如包含「縣市」與「區域」。');
-        }
-      } catch (geoError) {
-        console.error("Geocoding error:", geoError);
-        const errorMessage = geoError instanceof Error ? geoError.message : '地址定位時發生未知錯誤。';
-        setError(errorMessage);
-        // Still set a selected property to show the user's input, but without coordinates
-        const tempErrorProperty: Property = {
-          ...(mockProperties[0]),
-          id: `error_${Date.now()}`,
+    let propertyToValuate: Property | null = null;
+      
+    // Path A: Geolocation or other direct coordinate-based search
+    if (details) {
+        const { coords, district } = details;
+        // FIX: Construct a clean property object using safe defaults and the correct, passed-in data.
+        // This prevents data corruption from using a random mock property as a base.
+        propertyToValuate = {
+          ...defaultPropertyData,
+          id: `prop_${Date.now()}`,
           address: address,
+          latitude: coords.lat,
+          longitude: coords.lon,
+          district: district,
+          imageUrl: `https://picsum.photos/seed/${Date.now()}/800/600`,
         };
-        setSelectedProperty(tempErrorProperty);
-        setTransactionList([tempErrorProperty]);
-        setIsLoading(false);
-        setIsValuating(false);
-        return; 
-      }
+    } else {
+        // Path B: Text-based search
+        // FIX: Use a strict, case-insensitive match to avoid false positives from fuzzy matching.
+        propertyToValuate = mockProperties.find(p => 
+          p.address.trim().toLowerCase() === address.trim().toLowerCase()
+        ) || null;
+          
+        const isSearchingForSelectedProperty = selectedProperty &&
+          selectedProperty.address === address &&
+          selectedProperty.latitude &&
+          selectedProperty.longitude;
+
+        if (!propertyToValuate && address) {
+          if (isSearchingForSelectedProperty) { // This handles map drags
+            propertyToValuate = selectedProperty;
+          } else {
+             // No exact match found, so forward-geocode the address string.
+            try {
+              const sanitizedAddress = sanitizeAddressForGeocoding(address);
+              const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(sanitizedAddress)}&countrycodes=tw&addressdetails=1&accept-language=zh-TW`);
+              if (!response.ok) throw new Error('Geocoding service failed');
+              const data = await response.json();
+
+              if (data && data.length > 0) {
+                const { lat, lon, address: addrDetails } = data[0];
+                let constructedAddress = address; // Fallback to user input
+
+                if (addrDetails) {
+                  const hn = addrDetails.house_number ? String(addrDetails.house_number).trim() : '';
+                  // FIX: Robustly handle '號' suffix to prevent duplicates.
+                  const houseNumberPart = hn ? (hn.endsWith('號') ? hn : `${hn}號`) : '';
+
+                  const addressParts = [
+                    addrDetails.city || addrDetails.county,
+                    addrDetails.suburb || addrDetails.city_district,
+                    addrDetails.road,
+                    houseNumberPart
+                  ];
+                  const tempAddress = addressParts.filter(Boolean).join('');
+                  if (tempAddress) {
+                      constructedAddress = tempAddress;
+                  }
+                }
+
+                propertyToValuate = {
+                  ...defaultPropertyData,
+                  id: `prop_${Date.now()}`,
+                  address: constructedAddress,
+                  latitude: parseFloat(lat),
+                  longitude: parseFloat(lon),
+                  district: addrDetails.suburb || addrDetails.city_district || '未知區域',
+                  imageUrl: `https://picsum.photos/seed/${Date.now()}/800/600`,
+                };
+              } else {
+                throw new Error('地址無法定位。請嘗試輸入更完整的地址，例如包含「縣市」與「區域」。');
+              }
+            } catch (geoError) {
+              console.error("Geocoding error:", geoError);
+              const errorMessage = geoError instanceof Error ? geoError.message : '地址定位時發生未知錯誤。';
+              setError(errorMessage);
+              const tempErrorProperty: Property = {
+                ...(mockProperties[0]),
+                id: `error_${Date.now()}`,
+                address: address,
+              };
+              setSelectedProperty(tempErrorProperty);
+              setTransactionList([tempErrorProperty]);
+              setIsLoading(false);
+              setIsValuating(false);
+              return; 
+            }
+          }
+        }
     }
     
     if (!propertyToValuate) {
@@ -185,7 +253,6 @@ const App: React.FC = () => {
 
     // Add to recent searches right after we have a valid property
     setRecentSearches(prevSearches => {
-        // Prevent duplicates based on address, more robust for geocoded results
         const filtered = prevSearches.filter(p => p.address !== propertyToValuate!.address);
         const updatedSearches = [propertyToValuate!, ...filtered];
         const cappedSearches = updatedSearches.slice(0, 5);
@@ -198,7 +265,7 @@ const App: React.FC = () => {
     setTransactionList([propertyToValuate, ...nearby]);
     
     try {
-      const report = await getValuation(propertyToValuate, nearby);
+      const report = await getValuation(propertyToValuate, nearby, reference);
       setValuation(report);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : '估價時發生未知錯誤，請稍後再試。';
@@ -207,7 +274,49 @@ const App: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [selectedProperty]);
+
+  const handleToggleCompare = useCallback(async (property: Property) => {
+    setComparisonList(prev => {
+      const isInList = prev.some(p => p.id === property.id);
+      if (isInList) {
+        return prev.filter(p => p.id !== property.id);
+      } else {
+        if (prev.length >= 4) {
+            alert('最多只能比較 4 個房產。');
+            return prev;
+        }
+        
+        if (!comparisonValuations[property.id] || comparisonValuations[property.id].error) {
+           setComparisonValuations(prevVals => ({
+              ...prevVals,
+              [property.id]: { report: null, isLoading: true, error: null }
+            }));
+
+           const nearby = generateNearbyProperties(property, 4);
+           getValuation(property, nearby, '綜合市場因素')
+             .then(report => {
+                setComparisonValuations(prevVals => ({
+                   ...prevVals,
+                   [property.id]: { report, isLoading: false, error: null }
+                }));
+             })
+             .catch(err => {
+                const errorMessage = err instanceof Error ? err.message : '估價失敗';
+                setComparisonValuations(prevVals => ({
+                   ...prevVals,
+                   [property.id]: { report: null, isLoading: false, error: errorMessage }
+                }));
+             });
+        }
+        return [...prev, property];
+      }
+    });
+  }, [comparisonValuations]);
+
+  const handleClearCompare = () => {
+    setComparisonList([]);
+  };
 
   const toggleFavorite = (property: Property) => {
     let updatedFavorites;
@@ -230,38 +339,21 @@ const App: React.FC = () => {
   };
   
   const handleSelectRecent = (property: Property) => {
-    handleSearch(property.address);
+    handleSearch(
+      property.address, 
+      '綜合市場因素', 
+      property.latitude && property.longitude 
+        ? { coords: { lat: property.latitude, lon: property.longitude }, district: property.district } 
+        : undefined
+    );
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   return (
-    <div className="min-h-screen bg-slate-100/50 font-sans text-slate-800">
+    <div className="min-h-screen bg-emerald-50 font-sans text-slate-800">
       <Header />
-      <main className="container mx-auto p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Left Column */}
-        <div className="lg:col-span-4 space-y-8">
-          <MapView 
-            property={selectedProperty}
-            properties={transactionList}
-            filters={filters}
-            onSelectProperty={selectPropertyFromList} 
-          />
-          <RecentSearchesList
-            searches={recentSearches}
-            onSelect={handleSelectRecent}
-          />
-          <FavoritesList 
-            properties={transactionList}
-            favorites={favorites}
-            filters={filters}
-            onSelectProperty={selectPropertyFromList}
-            onToggleFavorite={toggleFavorite}
-            onFilterChange={handleFilterChange}
-            onClearFilters={handleClearFilters}
-          />
-        </div>
-
-        {/* Right Column */}
+      <main className="container mx-auto p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-8 pb-32">
+        {/* Left Column (Main Content) */}
         <div className="lg:col-span-8">
           <div className="bg-white rounded-2xl shadow-lg p-6 sm:p-8 sticky top-6">
             <SearchForm onSearch={handleSearch} isLoading={isLoading} initialAddress={selectedProperty?.address || ''} />
@@ -279,7 +371,51 @@ const App: React.FC = () => {
             )}
           </div>
         </div>
+      
+        {/* Right Column (Sidebar) */}
+        <div className="lg:col-span-4 space-y-8">
+          <MapView 
+            property={selectedProperty}
+            properties={transactionList}
+            filters={filters}
+            onSelectProperty={selectPropertyFromList} 
+          />
+          <RecentSearchesList
+            searches={recentSearches}
+            onSelect={handleSelectRecent}
+            comparisonList={comparisonList}
+            onToggleCompare={handleToggleCompare}
+          />
+          <FavoritesList 
+            properties={transactionList}
+            favorites={favorites}
+            filters={filters}
+            onSelectProperty={selectPropertyFromList}
+            onToggleFavorite={toggleFavorite}
+            onFilterChange={handleFilterChange}
+            onClearFilters={handleClearFilters}
+            comparisonList={comparisonList}
+            onToggleCompare={handleToggleCompare}
+          />
+        </div>
       </main>
+
+      {comparisonList.length > 0 && (
+        <ComparisonTray
+          properties={comparisonList}
+          onCompare={() => setIsComparing(true)}
+          onRemove={handleToggleCompare}
+          onClear={handleClearCompare}
+        />
+      )}
+
+      {isComparing && (
+        <ComparisonView
+          properties={comparisonList}
+          valuations={comparisonValuations}
+          onClose={() => setIsComparing(false)}
+        />
+      )}
     </div>
   );
 };

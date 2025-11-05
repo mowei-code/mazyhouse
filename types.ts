@@ -43,3 +43,9 @@ export interface Filters {
   pricePerSqm: string;
   size: string;
 }
+
+export interface ComparisonValuationState {
+  report: ValuationReport | null;
+  isLoading: boolean;
+  error: string | null;
+}

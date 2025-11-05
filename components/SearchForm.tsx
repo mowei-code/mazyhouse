@@ -1,16 +1,27 @@
-
 import React, { useState, useEffect } from 'react';
 import { MapPinIcon } from './icons/MapPinIcon';
 import { SparklesIcon } from './icons/SparklesIcon';
 
 interface SearchFormProps {
-  onSearch: (address: string) => void;
+  onSearch: (
+    address: string,
+    reference: string,
+    details?: { coords: { lat: number; lon: number }; district: string }
+  ) => void;
   isLoading: boolean;
   initialAddress: string;
 }
 
+const valuationReferences = [
+    { value: '綜合市場因素', label: '綜合市場因素' },
+    { value: '實價登錄', label: '實價登錄' },
+    { value: '房屋仲介觀點', label: '房屋仲介觀點' },
+    { value: '真實坪數', label: '真實坪數' },
+];
+
 export const SearchForm: React.FC<SearchFormProps> = ({ onSearch, isLoading, initialAddress }) => {
   const [address, setAddress] = useState(initialAddress);
+  const [reference, setReference] = useState(valuationReferences[0].value);
   const [geolocationError, setGeolocationError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -21,7 +32,7 @@ export const SearchForm: React.FC<SearchFormProps> = ({ onSearch, isLoading, ini
     e.preventDefault();
     setGeolocationError(null);
     if (address.trim()) {
-      onSearch(address.trim());
+      onSearch(address.trim(), reference);
     }
   };
   
@@ -32,14 +43,40 @@ export const SearchForm: React.FC<SearchFormProps> = ({ onSearch, isLoading, ini
         async (position) => {
           try {
             const { latitude, longitude } = position.coords;
-            const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`);
+            const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}&accept-language=zh-TW`);
             if (!response.ok) {
                 throw new Error('Reverse geocoding failed');
             }
             const data = await response.json();
-            const fetchedAddress = data.display_name || `緯度: ${latitude.toFixed(5)}, 經度: ${longitude.toFixed(5)}`;
+            
+            let fetchedAddress = '';
+            let fetchedDistrict = '未知區域';
+
+            if (data.address) {
+                const addr = data.address;
+                // FIX: Trim whitespace from house number string before suffix check to prevent duplication.
+                const hn = addr.house_number ? String(addr.house_number).trim() : '';
+                const houseNumberPart = hn ? (hn.endsWith('號') ? hn : `${hn}號`) : '';
+                
+                const addressParts = [
+                    addr.city || addr.county,
+                    addr.suburb || addr.city_district,
+                    addr.road,
+                    houseNumberPart
+                ];
+                fetchedAddress = addressParts.filter(Boolean).join('');
+                fetchedDistrict = addr.suburb || addr.city_district || addr.county || '未知區域';
+            }
+            
+            if (!fetchedAddress) {
+                fetchedAddress = data.display_name || `緯度: ${latitude.toFixed(5)}, 經度: ${longitude.toFixed(5)}`;
+            }
+
             setAddress(fetchedAddress);
-            onSearch(fetchedAddress);
+            onSearch(fetchedAddress, reference, { 
+                coords: { lat: latitude, lon: longitude },
+                district: fetchedDistrict,
+            });
           } catch (error) {
               console.error("Geolocation reverse geocoding error:", error);
               setGeolocationError("無法將目前位置轉換為地址。");
@@ -71,12 +108,11 @@ export const SearchForm: React.FC<SearchFormProps> = ({ onSearch, isLoading, ini
   };
 
   return (
-    <form onSubmit={handleSubmit} className="mb-8">
-      <label htmlFor="address-search" className="block text-sm font-medium text-slate-600 mb-2">
-        輸入地址或使用定位查詢
-      </label>
-      <div className="flex flex-col sm:flex-row gap-2">
+    <form onSubmit={handleSubmit} className="mb-6">
+      <div className="flex flex-col gap-4">
+        {/* Address Input and Geolocation Button */}
         <div className="relative flex-grow">
+          <label htmlFor="address-search" className="sr-only">地址搜尋</label>
           <input
             id="address-search"
             type="text"
@@ -95,14 +131,54 @@ export const SearchForm: React.FC<SearchFormProps> = ({ onSearch, isLoading, ini
             disabled={isLoading}
             className="absolute inset-y-0 right-0 px-3 flex items-center text-slate-500 hover:text-blue-600 transition-colors"
             title="使用目前位置"
+            aria-label="使用目前位置"
           >
             <MapPinIcon className="h-5 w-5" />
           </button>
         </div>
+
+        {/* Valuation Reference Radio Buttons */}
+        <fieldset>
+          <legend className="block text-sm font-medium text-slate-600 mb-2">
+            估價參考基準
+          </legend>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {valuationReferences.map((ref) => (
+              <div key={ref.value}>
+                <input
+                  type="radio"
+                  id={`ref-${ref.value}`}
+                  name="valuation-reference"
+                  value={ref.value}
+                  checked={reference === ref.value}
+                  onChange={(e) => setReference(e.target.value)}
+                  className="sr-only"
+                  disabled={isLoading}
+                />
+                <label
+                  htmlFor={`ref-${ref.value}`}
+                  className={`
+                    block w-full text-center px-3 py-2 border rounded-lg cursor-pointer text-sm font-medium transition-all
+                    ${
+                      reference === ref.value
+                        ? 'bg-blue-600 border-blue-600 text-white shadow-md'
+                        : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100 hover:border-slate-400'
+                    }
+                    ${isLoading ? 'cursor-not-allowed opacity-50' : ''}
+                  `}
+                >
+                  {ref.label}
+                </label>
+              </div>
+            ))}
+          </div>
+        </fieldset>
+
+        {/* Submit Button */}
         <button
           type="submit"
-          disabled={isLoading}
-          className="w-full sm:w-auto flex justify-center items-center gap-2 px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 disabled:bg-slate-400 disabled:cursor-not-allowed transition-all duration-150 transform hover:scale-105"
+          disabled={isLoading || !address.trim()}
+          className="w-full flex justify-center items-center gap-2 px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 disabled:bg-slate-400 disabled:cursor-not-allowed transition-all duration-150 transform hover:scale-105"
         >
           {isLoading ? (
             <>
@@ -121,7 +197,7 @@ export const SearchForm: React.FC<SearchFormProps> = ({ onSearch, isLoading, ini
         </button>
       </div>
       {geolocationError && (
-        <div className="mt-2 text-sm text-red-700 bg-red-100 border border-red-200 rounded-lg p-3 flex justify-between items-center transition-opacity duration-300" role="alert">
+        <div className="mt-4 text-sm text-red-700 bg-red-100 border border-red-200 rounded-lg p-3 flex justify-between items-center transition-opacity duration-300" role="alert">
           <span>{geolocationError}</span>
           <button 
             type="button" 

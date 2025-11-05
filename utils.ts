@@ -51,3 +51,10 @@ export const applyFilters = (properties: Property[], filters: Filters): Property
     return true;
   });
 };
+
+export const sanitizeAddressForGeocoding = (address: string): string => {
+  // Nominatim (OpenStreetMap's geocoder) often fails with certain Taiwanese address formats.
+  // This function simplifies them to improve the likelihood of a successful geocoding lookup.
+  // It handles formats like "79之1號" and "79-1號" by simplifying them to "79號".
+  return address.replace(/(\d+)[之-]\d+號/g, '$1號');
+};

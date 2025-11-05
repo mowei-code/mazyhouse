@@ -1,20 +1,28 @@
 import React from 'react';
 import type { Property } from '../types';
-// Fix: Correctly import named exports StarIconSolid and StarIconOutline.
 import { StarIconSolid } from './icons/StarIconSolid';
 import { StarIconOutline } from './icons/StarIconOutline';
+import { PlusCircleIcon } from './icons/PlusCircleIcon';
+import { CheckCircleIcon } from './icons/CheckCircleIcon';
 
 interface PropertyCardProps {
   property: Property;
   onSelect: (property: Property) => void;
   onToggleFavorite: (property: Property) => void;
   isFavorite: boolean;
+  isInCompareList: boolean;
+  onToggleCompare: (property: Property) => void;
 }
 
-export const PropertyCard: React.FC<PropertyCardProps> = ({ property, onSelect, onToggleFavorite, isFavorite }) => {
+export const PropertyCard: React.FC<PropertyCardProps> = ({ property, onSelect, onToggleFavorite, isFavorite, isInCompareList, onToggleCompare }) => {
   const handleFavoriteClick = (e: React.MouseEvent) => {
     e.stopPropagation(); // Prevent card selection when toggling favorite
     onToggleFavorite(property);
+  };
+
+  const handleCompareClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onToggleCompare(property);
   };
   
   const formatPrice = (price: number) => {
@@ -24,7 +32,7 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({ property, onSelect, 
   return (
     <div 
       onClick={() => onSelect(property)}
-      className="flex items-center gap-4 p-3 bg-slate-50 rounded-lg hover:bg-slate-100 cursor-pointer transition-colors duration-150"
+      className="flex items-center gap-4 p-3 bg-emerald-50/60 rounded-lg hover:bg-emerald-100/70 cursor-pointer transition-all duration-200 ease-in-out hover:shadow-md hover:scale-[1.02]"
     >
       <img src={property.imageUrl} alt={property.address} className="w-16 h-16 rounded-md object-cover flex-shrink-0" />
       <div className="flex-grow min-w-0">
@@ -40,9 +48,22 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({ property, onSelect, 
         </div>
         <p className="text-sm font-bold text-blue-600 mt-1">{formatPrice(property.price)}</p>
       </div>
-      <button onClick={handleFavoriteClick} className="p-2 text-slate-400 hover:text-yellow-500 transition-colors flex-shrink-0">
-        {isFavorite ? <StarIconSolid className="h-5 w-5 text-yellow-400" /> : <StarIconOutline className="h-5 w-5" />}
-      </button>
+      <div className="flex-shrink-0 flex flex-col items-center gap-2">
+        <button 
+          onClick={handleFavoriteClick} 
+          className="p-1 text-slate-400 hover:text-yellow-500 transition-colors"
+          title={isFavorite ? '從收藏中移除' : '加入收藏'}
+        >
+          {isFavorite ? <StarIconSolid className="h-5 w-5 text-yellow-400" /> : <StarIconOutline className="h-5 w-5" />}
+        </button>
+        <button
+          onClick={handleCompareClick}
+          className={`p-1 rounded-full transition-colors ${isInCompareList ? 'text-green-600 hover:bg-green-100' : 'text-slate-400 hover:bg-slate-200'}`}
+          title={isInCompareList ? '從比較中移除' : '加入比較'}
+        >
+          {isInCompareList ? <CheckCircleIcon className="h-5 w-5" /> : <PlusCircleIcon className="h-5 w-5" />}
+        </button>
+      </div>
     </div>
   );
 };

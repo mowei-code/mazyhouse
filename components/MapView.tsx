@@ -11,7 +11,7 @@ const iconUrl = 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png';
 const iconRetinaUrl = 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png';
 const shadowUrl = 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png';
 
-const defaultIcon = L.icon({
+const mainPulsingIcon = L.icon({
     iconUrl,
     iconRetinaUrl,
     shadowUrl,
@@ -19,7 +19,8 @@ const defaultIcon = L.icon({
     iconAnchor: [12, 41],
     popupAnchor: [1, -34],
     tooltipAnchor: [16, -28],
-    shadowSize: [41, 41]
+    shadowSize: [41, 41],
+    className: 'pulsing-main-marker'
 });
 
 // A distinct icon for nearby (non-selected) properties
@@ -70,7 +71,7 @@ export const MapView: React.FC<MapViewProps> = ({ property, properties, filters,
   const mapContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Initialize map and layer group only once
+    // Initialize map and marker cluster group only once
     if (mapContainerRef.current && !mapRef.current) {
       mapRef.current = L.map(mapContainerRef.current).setView([25.0330, 121.5654], 13); // Default to Taipei
 
@@ -79,7 +80,8 @@ export const MapView: React.FC<MapViewProps> = ({ property, properties, filters,
         maxZoom: 19,
       }).addTo(mapRef.current);
       
-      nearbyMarkersRef.current = L.layerGroup().addTo(mapRef.current);
+      // Use MarkerClusterGroup for nearby properties
+      nearbyMarkersRef.current = L.markerClusterGroup().addTo(mapRef.current);
     }
 
     // --- Cleanup previous markers and controls ---
@@ -107,17 +109,25 @@ export const MapView: React.FC<MapViewProps> = ({ property, properties, filters,
 
       // --- Create Main Marker for selected property ---
       mainMarkerRef.current = L.marker([latitude, longitude], { 
-        icon: defaultIcon,
+        icon: mainPulsingIcon,
         draggable: true,
         zIndexOffset: 1000, // Keep the main marker on top
       }).addTo(mapRef.current);
+
+      // Add hover tooltip
+      mainMarkerRef.current.bindTooltip(address, {
+        permanent: false,
+        sticky: true,
+        direction: 'top',
+        offset: L.point(0, -41)
+      });
 
       mainMarkerRef.current.on('dragend', async (event: any) => {
         const marker = event.target;
         const position = marker.getLatLng();
 
         const loadingProperty: Property = {
-            ...(properties[0] || {}),
+            ...(property || mockProperties[0]), // Use current property or fallback for loading state
             id: `custom_${Date.now()}`,
             address: '正在查詢地址...',
             latitude: position.lat,
@@ -128,11 +138,30 @@ export const MapView: React.FC<MapViewProps> = ({ property, properties, filters,
         onSelectProperty(loadingProperty);
 
         try {
-          const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${position.lat}&lon=${position.lng}`);
+          const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${position.lat}&lon=${position.lng}&accept-language=zh-TW`);
           if (!response.ok) throw new Error('Reverse geocoding failed');
           const data = await response.json();
           
-          const fetchedAddress = data.display_name || `緯度: ${position.lat.toFixed(5)}, 經度: ${position.lng.toFixed(5)}`;
+          let fetchedAddress = '';
+          if (data.address) {
+            const addr = data.address;
+            // FIX: Trim whitespace from house number string before suffix check to prevent duplication.
+            const hn = addr.house_number ? String(addr.house_number).trim() : '';
+            const houseNumberPart = hn ? (hn.endsWith('號') ? hn : `${hn}號`) : '';
+
+            const addressParts = [
+              addr.city || addr.county,
+              addr.suburb || addr.city_district,
+              addr.road,
+              houseNumberPart
+            ];
+            fetchedAddress = addressParts.filter(Boolean).join('');
+          }
+          
+          if (!fetchedAddress) {
+              fetchedAddress = data.display_name || `緯度: ${position.lat.toFixed(5)}, 經度: ${position.lng.toFixed(5)}`;
+          }
+
           const baseProperty = properties.length > 0 ? properties[Math.floor(Math.random() * properties.length)] : mockProperties[0];
           
           const customProperty: Property = {
@@ -141,7 +170,7 @@ export const MapView: React.FC<MapViewProps> = ({ property, properties, filters,
             address: fetchedAddress,
             latitude: position.lat,
             longitude: position.lng,
-            district: data.address?.city || data.address?.county || '自訂位置',
+            district: data.address?.suburb || data.address?.city_district || data.address?.city || data.address?.county || '自訂位置',
             price: 0,
           };
           
@@ -168,10 +197,19 @@ export const MapView: React.FC<MapViewProps> = ({ property, properties, filters,
 
           marker.bindPopup(`<b>${otherProperty.address}</b><br/>點擊以查看詳情`);
 
+          // Add hover tooltip for nearby markers
+          marker.bindTooltip(otherProperty.address, {
+            permanent: false,
+            sticky: true,
+            direction: 'top',
+            offset: L.point(0, -41)
+          });
+
           marker.on('click', () => {
             onSelectProperty(otherProperty);
           });
           
+          // Add marker to the cluster group
           nearbyMarkersRef.current.addLayer(marker);
         }
       });
@@ -195,8 +233,21 @@ export const MapView: React.FC<MapViewProps> = ({ property, properties, filters,
   }, [property, properties, filters, onSelectProperty]);
 
   return (
-    <div className="bg-white rounded-2xl shadow-lg p-4">
-      <div ref={mapContainerRef} className="h-64 md:h-80 rounded-lg" style={{ zIndex: 0 }}></div>
-    </div>
+    <>
+      <style>{`
+        @keyframes pulse-animation {
+            0% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.7); }
+            70% { box-shadow: 0 0 0 15px rgba(37, 99, 235, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
+        }
+        .leaflet-marker-icon.pulsing-main-marker {
+            border-radius: 50%;
+            animation: pulse-animation 2s infinite;
+        }
+      `}</style>
+      <div className="bg-white rounded-2xl shadow-lg p-4">
+        <div ref={mapContainerRef} className="h-64 md:h-80 rounded-lg" style={{ zIndex: 0 }}></div>
+      </div>
+    </>
   );
 };

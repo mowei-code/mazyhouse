@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import type { Property, ValuationReport } from '../types';
 
@@ -75,16 +74,51 @@ const valuationSchema = {
   required: ['estimatedPrice', 'pricePerSqm', 'priceTrend', 'pros', 'cons', 'marketSummary', 'confidence', 'amenitiesAnalysis'],
 };
 
-export async function getValuation(property: Property, nearbyProperties: Property[]): Promise<ValuationReport> {
+export async function getValuation(property: Property, nearbyProperties: Property[], reference: string): Promise<ValuationReport> {
   const nearbyPropertiesContext = nearbyProperties.length > 0
     ? nearbyProperties.map(p => 
         `- 地址: ${p.address}, 總價: ${Math.round(p.price / 10000)}萬, 坪數: ${(p.size / 3.30579).toFixed(1)}坪, 屋齡: ${new Date().getFullYear() - p.yearBuilt}年, 交易日期: ${p.transactionDate || '近期'}`
       ).join('\n')
     : '無可用的附近交易資料。';
 
+  let referenceInstruction = '';
+    switch (reference) {
+        case '實價登錄':
+            referenceInstruction = `
+            **估價參考基準: 實價登錄**
+            您的角色是數據分析師。請嚴格基於下方提供的「模擬的附近交易資料」進行估價。計算出該區域的平均單價，並以此為基礎，根據目標房產的條件（屋齡、樓層等）做微幅調整。您的分析應著重於數據，避免過多主觀或未來性的預測。
+            `;
+            break;
+        case '房屋仲介觀點':
+            referenceInstruction = `
+            **估價參考基準: 房屋仲介觀點**
+            您的角色是經驗豐富的房仲。您的估價應帶有銷售導向，挖掘房產的最大潛力。請參考附近交易資料，但更要強調目標房產的獨特優勢（如地點、格局、屋況潛力）。您的估價可以偏向市場的高標，並在市場總結中強調未來增值潛力，用以說服潛在買家。
+            `;
+            break;
+        case '真實坪數':
+             referenceInstruction = `
+            **估價參考基準: 真實坪數**
+            您的角色是估價師，專注於成本法。請以「單價」為核心進行計算。首先，從「模擬的附近交易資料」中計算出一個可靠的平均「每坪單價」。然後，將此單價乘以目標房產的坪數，得出基礎總價。最後，根據樓層、屋齡等因素進行不超過5%的微調。您的分析應簡潔、客觀，聚焦於數字。
+            `;
+            break;
+        case '綜合市場因素':
+        default:
+            referenceInstruction = `
+            **估價參考基準: 綜合市場因素**
+            您的角色是市場分析師，進行全面性的評估。請平衡考量地點、附近交易資料、宏觀經濟趨勢以及房產自身條件。您的估價應是一個中立、客觀的市場價值，反映當前的供需狀況。
+            `;
+            break;
+    }
+
   const prompt = `
-    您是一位專業的台灣房地產分析師。請根據以下房產資訊，並**高度參考**我們提供的「附近實價登錄資料」，提供一份詳細且盡量貼近市場行情的估價報告。估價應反映真實的市場交易價值。
-    請嚴格遵守提供的 JSON schema 格式進行回覆。
+    您是一位頂尖的台灣房地產分析師，擁有對各地區房價行情的深入了解。您的首要任務是提供一個**基於地點**的精準估價。
+
+    **估價核心原則 (請嚴格遵守):**
+    1.  **地點決定一切:** 房產的「城市」與「行政區」是影響價格最重要的因素，權重遠高於其他所有條件。例如，'台北市大安區'的房價基準遠高於'新北市中和區'。請務必運用您對台灣各區域市場行情的知識來校準估價。
+    2.  **參考資料的批判性使用:** 下方提供的「附近實價登錄資料」是**模擬數據**，僅供初步參考。如果這些數據與您對該地區的認知有顯著差異，請**優先採用您的專業知識**來判斷，並在市場總結中簡要說明您的判斷依據。
+    3.  **綜合評估:** 在確定了地點的價格基準後，再根據房屋類型、屋齡、坪數、樓層等條件進行細微調整。
+
+    ${referenceInstruction}
 
     **主要評估房產資訊:**
     - 地址: ${property.address}
@@ -93,22 +127,11 @@ export async function getValuation(property: Property, nearbyProperties: Propert
     - 格局: ${property.bedrooms} 房 / ${property.bathrooms} 衛
     - 屋齡: ${new Date().getFullYear() - property.yearBuilt} 年 (建於 ${property.yearBuilt} 年)
     - 樓層: ${property.floor}
-
-    **附近實價登錄資料 (重要參考):**
+    
+    **模擬的附近交易資料 (僅供參考):**
 ${nearbyPropertiesContext}
 
-    請基於以上所有資訊，進行綜合分析後，提供以下資訊：
-    1.  **估計總價 (estimatedPrice)**: 新台幣。請確保此價格反映了附近相似房產的成交行情，並根據主要評估房產的條件（屋齡、樓層、格局等）進行合理調整。
-    2.  **每坪單價 (pricePerSqm)**: 請換算成每平方公尺的價格後填入。
-    3.  **房價趨勢 (priceTrend)**: 提供過去10年，每半年一個數據點的價格趨勢 (共20個點)。label 格式為 "YYYY H1" 或 "YYYY H2"，例如 "2023 H1"。
-    4.  **優點 (pros)**: 列出3個主要優點。
-    5.  **缺點 (cons)**: 列出3個主要缺點。
-    6.  **市場總結 (marketSummary)**: 一段約100字的市場分析，說明您的估價依據，特別是與周邊行情的比較。
-    7.  **信心指數 (confidence)**: "高"、"中" 或 "低"。
-    8.  **周邊機能分析 (amenitiesAnalysis)**: 分析房產周邊的生活機能，分別列出：
-        - **學校 (schools)**: 附近的著名學校或學區。
-        - **交通 (transport)**: 主要的捷運站、公車站或交通幹道。
-        - **購物 (shopping)**: 傳統市場、超市或百貨公司。
+    請基於以上所有資訊，進行綜合分析後，並嚴格遵守提供的 JSON schema 格式進行回覆。
   `;
 
   try {
@@ -152,5 +175,52 @@ ${nearbyPropertiesContext}
     }
     // Generic error for other cases
     throw new Error("無法從 AI 模型取得估價。請檢查您的網路連線或 API 金鑰是否有效。");
+  }
+}
+
+export async function getValuationAdjustment(property: Property, originalReport: ValuationReport, userQuery: string): Promise<string> {
+    const prompt = `
+    您是一位專業的台灣房地產分析師。
+    這是一份針對以下房產的初步 AI 估價報告：
+
+    **房產資訊:**
+    - 地址: ${property.address}
+    - 類型: ${property.type}
+    - 坪數: ${Math.round(property.size / 3.30579)} 坪
+    - 格局: ${property.bedrooms} 房 / ${property.bathrooms} 衛
+    - 屋齡: ${new Date().getFullYear() - property.yearBuilt} 年
+    - 估計總價: ${originalReport.estimatedPrice.toLocaleString('zh-TW')} TWD
+
+    **初步報告摘要:**
+    ${originalReport.marketSummary}
+
+    現在，請根據使用者提出的以下「情境」，分析此情境對房價可能造成的影響。
+    請提供一段簡潔的分析說明（約100-150字），並在**可能的情況下**，提供一個調整後的**預估價格區間**。
+    您的回覆應口語化、易於理解，並直接回答使用者的問題。
+
+    **使用者情境:**
+    "${userQuery}"
+
+    請直接提供分析文字，不要使用 JSON 格式。
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: [{ parts: [{ text: prompt }] }],
+      config: {
+        temperature: 0.3,
+      },
+    });
+    return response.text;
+  } catch (error) {
+    console.error("Error calling Gemini API for adjustment:", error);
+    if (error && typeof error === 'object') {
+        const apiErrorDetails = (error as any).error || error;
+        if (apiErrorDetails && (String(apiErrorDetails.code) === '429' || apiErrorDetails.status === 'RESOURCE_EXHAUSTED')) {
+            throw new Error("API 請求頻率過高，已超出目前方案的額度，請稍後再試。");
+        }
+    }
+    throw new Error("無法從 AI 模型取得情境分析。請檢查您的網路連線或 API 金鑰是否有效。");
   }
 }
