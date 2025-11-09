@@ -58,3 +58,61 @@ export const sanitizeAddressForGeocoding = (address: string): string => {
   // It handles formats like "79之1號" and "79-1號" by simplifying them to "79號".
   return address.replace(/(\d+)[之-]\d+號/g, '$1號');
 };
+
+export const parseAddress = (address: string): { city: string | null, district: string | null } => {
+    // This regex is designed to capture Taiwanese city/county and district/township names.
+    // e.g., "台北市大安區..." -> city: "台北市", district: "大安區"
+    // e.g., "新北市板橋區..." -> city: "新北市", district: "板橋區"
+    const match = address.match(/^(..[市縣])(..[區鄉鎮市])/);
+    if (match && match.length >= 3) {
+        return { city: match[1], district: match[2] };
+    }
+    return { city: null, district: null };
+};
+
+export const formatNominatimAddress = (data: any): string => {
+    // Prioritize using the structured 'address' object for correct ordering
+    if (data?.address) {
+        const addr = data.address;
+        const city = addr.city || addr.county || '';
+        const district = addr.suburb || addr.city_district || '';
+        const road = addr.road || '';
+        
+        let houseNumber = addr.house_number ? String(addr.house_number).trim() : '';
+        if (houseNumber && !houseNumber.endsWith('號')) {
+            houseNumber += '號';
+        }
+
+        const address = [city, district, road, houseNumber].filter(Boolean).join('');
+        // If we successfully built a reasonable address, return it.
+        if (address.length > 5) {
+            return address;
+        }
+    }
+    
+    // Fallback to cleaning up and reversing the 'display_name' if structured approach fails.
+    // Reversing is necessary because display_name is often ordered from smallest unit to largest.
+    if (data?.display_name) {
+        const addressParts = data.display_name.split(', ');
+        const relevantParts = addressParts
+            .filter((part: string) => 
+                !part.match(/^\d{3,5}$/) && // filter out postal code
+                part.toLowerCase() !== 'taiwan' && part !== '台灣' // filter out country
+            )
+            .reverse(); // Reverse to get City -> District -> Road order
+        return relevantParts.join('');
+    }
+
+    return ''; // Return empty if nothing can be parsed.
+};
+
+export const isSpecialTransaction = (property: Property): boolean => {
+  const remarksText = property.remarks ? property.remarks.trim() : '';
+  if (!remarksText) {
+    return false;
+  }
+  // This regex checks if the remarks *only* contain the standard boilerplate source text.
+  // If it contains more than that (e.g.,親友間交易), it's considered a special transaction.
+  const isBoilerplateOnly = /^資料來源\s*[:：]\s*內政部實價登錄$/.test(remarksText);
+  return !isBoilerplateOnly;
+};

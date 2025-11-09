@@ -1,15 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { MapPinIcon } from './icons/MapPinIcon';
 import { SparklesIcon } from './icons/SparklesIcon';
+import { formatNominatimAddress } from '../utils';
+import type { User } from '../types';
 
 interface SearchFormProps {
   onSearch: (
     address: string,
     reference: string,
-    details?: { coords: { lat: number; lon: number }; district: string }
+    details?: { coords: { lat: number; lon: number }; district: string; city?: string },
+    customInputs?: { size?: number; pricePerPing?: number; floor?: string }
+  ) => void;
+  onLocationSelect: (
+    address: string,
+    details: { coords: { lat: number; lon: number }; district: string; city?: string }
   ) => void;
   isLoading: boolean;
   initialAddress: string;
+  currentUser: User | null;
 }
 
 const valuationReferences = [
@@ -19,26 +27,60 @@ const valuationReferences = [
     { value: '真實坪數', label: '真實坪數' },
 ];
 
-export const SearchForm: React.FC<SearchFormProps> = ({ onSearch, isLoading, initialAddress }) => {
+const restrictedReferences = ['實價登錄', '房屋仲介觀點', '真實坪數'];
+
+export const SearchForm: React.FC<SearchFormProps> = ({ onSearch, onLocationSelect, isLoading, initialAddress, currentUser }) => {
   const [address, setAddress] = useState(initialAddress);
   const [reference, setReference] = useState(valuationReferences[0].value);
   const [geolocationError, setGeolocationError] = useState<string | null>(null);
+  const [customSize, setCustomSize] = useState('');
+  const [customPricePerPing, setCustomPricePerPing] = useState('');
+  const [customFloor, setCustomFloor] = useState('');
+
+  const userHasPermission = currentUser?.role === '管理員' || currentUser?.role === '付費用戶';
 
   useEffect(() => {
     setAddress(initialAddress);
   }, [initialAddress]);
 
+  // Reset reference if the current one becomes disabled (e.g., on logout)
+  useEffect(() => {
+    if (restrictedReferences.includes(reference) && !userHasPermission) {
+      setReference(valuationReferences[0].value);
+    }
+  }, [userHasPermission, reference]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setGeolocationError(null);
     if (address.trim()) {
-      onSearch(address.trim(), reference);
+      let customInputs: { size?: number; pricePerPing?: number; floor?: string } = {};
+      if (reference === '真實坪數') {
+        const sizeNum = parseFloat(customSize);
+        const priceNum = parseFloat(customPricePerPing);
+        if (!isNaN(sizeNum) && sizeNum > 0) {
+          customInputs.size = sizeNum;
+        }
+        if (!isNaN(priceNum) && priceNum > 0) {
+          customInputs.pricePerPing = priceNum;
+        }
+        if (customFloor.trim() !== '') {
+            customInputs.floor = customFloor.trim();
+        }
+      }
+      onSearch(address.trim(), reference, undefined, Object.keys(customInputs).length > 0 ? customInputs : undefined);
     }
   };
   
   const handleGeolocation = () => {
     setGeolocationError(null);
     if (navigator.geolocation) {
+      const options = {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0,
+      };
+
       navigator.geolocation.getCurrentPosition(
         async (position) => {
           try {
@@ -49,33 +91,25 @@ export const SearchForm: React.FC<SearchFormProps> = ({ onSearch, isLoading, ini
             }
             const data = await response.json();
             
-            let fetchedAddress = '';
+            let fetchedAddress = formatNominatimAddress(data);
             let fetchedDistrict = '未知區域';
+            let fetchedCity = undefined;
 
             if (data.address) {
                 const addr = data.address;
-                // FIX: Trim whitespace from house number string before suffix check to prevent duplication.
-                const hn = addr.house_number ? String(addr.house_number).trim() : '';
-                const houseNumberPart = hn ? (hn.endsWith('號') ? hn : `${hn}號`) : '';
-                
-                const addressParts = [
-                    addr.city || addr.county,
-                    addr.suburb || addr.city_district,
-                    addr.road,
-                    houseNumberPart
-                ];
-                fetchedAddress = addressParts.filter(Boolean).join('');
-                fetchedDistrict = addr.suburb || addr.city_district || addr.county || '未知區域';
+                fetchedDistrict = addr.suburb || addr.city_district || '未知區域';
+                fetchedCity = addr.city || addr.county;
             }
             
             if (!fetchedAddress) {
-                fetchedAddress = data.display_name || `緯度: ${latitude.toFixed(5)}, 經度: ${longitude.toFixed(5)}`;
+                fetchedAddress = `緯度: ${latitude.toFixed(5)}, 經度: ${longitude.toFixed(5)}`;
             }
 
             setAddress(fetchedAddress);
-            onSearch(fetchedAddress, reference, { 
+            onLocationSelect(fetchedAddress, { 
                 coords: { lat: latitude, lon: longitude },
                 district: fetchedDistrict,
+                city: fetchedCity
             });
           } catch (error) {
               console.error("Geolocation reverse geocoding error:", error);
@@ -100,7 +134,8 @@ export const SearchForm: React.FC<SearchFormProps> = ({ onSearch, isLoading, ini
               break;
           }
           setGeolocationError(errorMessage);
-        }
+        },
+        options
       );
     } else {
       setGeolocationError("您的瀏覽器不支援地理位置功能。");
@@ -122,14 +157,14 @@ export const SearchForm: React.FC<SearchFormProps> = ({ onSearch, isLoading, ini
               setGeolocationError(null);
             }}
             placeholder="例如：台北市大安區信義路四段1號"
-            className="w-full pl-4 pr-12 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-150 bg-white"
+            className="w-full pl-4 pr-12 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-150 bg-white"
             disabled={isLoading}
           />
           <button
             type="button"
             onClick={handleGeolocation}
             disabled={isLoading}
-            className="absolute inset-y-0 right-0 px-3 flex items-center text-slate-500 hover:text-blue-600 transition-colors"
+            className="absolute inset-y-0 right-0 px-3 flex items-center text-gray-500 hover:text-blue-600 transition-colors"
             title="使用目前位置"
             aria-label="使用目前位置"
           >
@@ -139,46 +174,106 @@ export const SearchForm: React.FC<SearchFormProps> = ({ onSearch, isLoading, ini
 
         {/* Valuation Reference Radio Buttons */}
         <fieldset>
-          <legend className="block text-sm font-medium text-slate-600 mb-2">
+          <legend className="block text-sm font-medium text-gray-600 mb-2">
             估價參考基準
           </legend>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {valuationReferences.map((ref) => (
-              <div key={ref.value}>
-                <input
-                  type="radio"
-                  id={`ref-${ref.value}`}
-                  name="valuation-reference"
-                  value={ref.value}
-                  checked={reference === ref.value}
-                  onChange={(e) => setReference(e.target.value)}
-                  className="sr-only"
-                  disabled={isLoading}
-                />
-                <label
-                  htmlFor={`ref-${ref.value}`}
-                  className={`
-                    block w-full text-center px-3 py-2 border rounded-lg cursor-pointer text-sm font-medium transition-all
-                    ${
-                      reference === ref.value
-                        ? 'bg-blue-600 border-blue-600 text-white shadow-md'
-                        : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100 hover:border-slate-400'
-                    }
-                    ${isLoading ? 'cursor-not-allowed opacity-50' : ''}
-                  `}
-                >
-                  {ref.label}
-                </label>
-              </div>
-            ))}
+            {valuationReferences.map((ref) => {
+                const isRestricted = restrictedReferences.includes(ref.value);
+                const isDisabled = isRestricted && !userHasPermission;
+
+                return (
+                  <div key={ref.value} title={isDisabled ? '此功能僅限付費會員及管理員使用' : ''}>
+                    <input
+                      type="radio"
+                      id={`ref-${ref.value}`}
+                      name="valuation-reference"
+                      value={ref.value}
+                      checked={reference === ref.value}
+                      onChange={(e) => setReference(e.target.value)}
+                      className="sr-only"
+                      disabled={isLoading || isDisabled}
+                    />
+                    <label
+                      htmlFor={`ref-${ref.value}`}
+                      className={`
+                        block w-full text-center px-3 py-2 border rounded-lg text-sm font-medium transition-all
+                        ${
+                          reference === ref.value
+                            ? 'bg-blue-600 border-blue-600 text-white shadow-md'
+                            : 'bg-white border-gray-300 text-gray-700'
+                        }
+                        ${!isDisabled ? 'cursor-pointer hover:bg-gray-100 hover:border-gray-400' : ''}
+                        ${isLoading || isDisabled ? 'cursor-not-allowed opacity-50' : ''}
+                      `}
+                    >
+                      {ref.label}
+                    </label>
+                  </div>
+                )
+            })}
           </div>
         </fieldset>
+
+        {/* Custom Inputs for '真實坪數' */}
+        {reference === '真實坪數' && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 bg-gray-50 border border-gray-200 rounded-lg">
+            <div>
+              <label htmlFor="custom-size" className="block text-sm font-medium text-gray-600 mb-1">
+                自訂實際坪數
+              </label>
+              <input
+                id="custom-size"
+                type="number"
+                value={customSize}
+                onChange={(e) => setCustomSize(e.target.value)}
+                placeholder="例如：32.5"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                disabled={isLoading}
+                step="0.01"
+              />
+            </div>
+            <div>
+              <label htmlFor="custom-price" className="block text-sm font-medium text-gray-600 mb-1">
+                自訂參考單價 (萬/坪)
+              </label>
+              <input
+                id="custom-price"
+                type="number"
+                value={customPricePerPing}
+                onChange={(e) => setCustomPricePerPing(e.target.value)}
+                placeholder="例如：85"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                disabled={isLoading}
+                step="0.1"
+              />
+            </div>
+            <div className="sm:col-span-2">
+               <label htmlFor="custom-floor" className="block text-sm font-medium text-gray-600 mb-1">
+                  自訂樓層 (選填)
+              </label>
+              <input
+                  id="custom-floor"
+                  type="text"
+                  value={customFloor}
+                  onChange={(e) => setCustomFloor(e.target.value)}
+                  placeholder="例如: 8樓 / 15樓"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                  disabled={isLoading}
+              />
+            </div>
+             <p className="text-xs text-gray-500 sm:col-span-2">
+                若填寫此區塊，AI 將優先使用您提供的數值進行估算。若留白，則會依據附近行情自動估算。
+            </p>
+          </div>
+        )}
+
 
         {/* Submit Button */}
         <button
           type="submit"
           disabled={isLoading || !address.trim()}
-          className="w-full flex justify-center items-center gap-2 px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 disabled:bg-slate-400 disabled:cursor-not-allowed transition-all duration-150 transform hover:scale-105"
+          className="w-full flex justify-center items-center gap-2 px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-all duration-150 transform hover:scale-105"
         >
           {isLoading ? (
             <>
@@ -191,7 +286,7 @@ export const SearchForm: React.FC<SearchFormProps> = ({ onSearch, isLoading, ini
           ) : (
             <>
               <SparklesIcon className="h-5 w-5" />
-              AI 智能估價
+              AI智慧為您估價參考
             </>
           )}
         </button>

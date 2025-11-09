@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import type { Property, Filters } from '../types';
-import { applyFilters } from '../utils';
+import { applyFilters, formatNominatimAddress, isSpecialTransaction } from '../utils';
 // FIX: Import mockProperties to be used as a fallback.
 import { PRICE_RANGES, BEDROOM_OPTIONS, YEAR_BUILT_RANGES, PRICE_PER_SQM_RANGES, SIZE_RANGES, mockProperties } from '../constants';
 
@@ -34,16 +34,29 @@ const nearbyIcon = L.icon({
     shadowSize: [41, 41]
 });
 
+// Define the static home property and location at the module level for clarity.
+const INITIAL_HOME_PROPERTY = mockProperties[0];
+const INITIAL_HOME_LOCATION = {
+  lat: INITIAL_HOME_PROPERTY.latitude!,
+  lon: INITIAL_HOME_PROPERTY.longitude!
+};
+
+
 interface MapViewProps {
   property: Property | null;
   properties: Property[];
   filters: Filters;
   onSelectProperty: (property: Property) => void;
+  onMapMarkerSelect: (property: Property) => void;
+  onLocationSelect: (
+    address: string,
+    details: { coords: { lat: number; lon: number }; district: string; city?: string }
+  ) => void;
 }
 
 const generateFilterSummary = (currentFilters: Filters): string[] => {
     const summary: string[] = [];
-    if (currentFilters.type !== 'all') summary.push(currentFilters.type);
+    if (currentFilters.type !== 'all' && currentFilters.type) summary.push(currentFilters.type);
 
     const priceLabel = PRICE_RANGES.find(r => r.value === currentFilters.price)?.label;
     if (priceLabel && currentFilters.price !== 'all') summary.push(priceLabel);
@@ -63,191 +76,271 @@ const generateFilterSummary = (currentFilters: Filters): string[] => {
     return summary;
 };
 
-export const MapView: React.FC<MapViewProps> = ({ property, properties, filters, onSelectProperty }) => {
+// Helper to prevent potential XSS from filter labels, though unlikely with current data.
+const escapeHtml = (unsafe: string): string => {
+    return unsafe
+         .replace(/&/g, "&amp;")
+         .replace(/</g, "&lt;")
+         .replace(/>/g, "&gt;")
+         .replace(/"/g, "&quot;")
+         .replace(/'/g, "&#039;");
+}
+
+export const MapView: React.FC<MapViewProps> = ({ property, properties, filters, onSelectProperty, onMapMarkerSelect, onLocationSelect }) => {
   const mapRef = useRef<any | null>(null);
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  
+  // Refs for DYNAMIC layers and controls to manage their lifecycle
   const mainMarkerRef = useRef<any | null>(null);
   const nearbyMarkersRef = useRef<any | null>(null);
   const filterControlRef = useRef<any | null>(null);
-  const mapContainerRef = useRef<HTMLDivElement>(null);
 
+  // Create refs for callbacks to avoid issues with stale closures in Leaflet event handlers.
+  const onSelectPropertyRef = useRef(onSelectProperty);
   useEffect(() => {
-    // Initialize map and marker cluster group only once
+    onSelectPropertyRef.current = onSelectProperty;
+  }, [onSelectProperty]);
+
+  const onLocationSelectRef = useRef(onLocationSelect);
+  useEffect(() => {
+    onLocationSelectRef.current = onLocationSelect;
+  }, [onLocationSelect]);
+
+  // Effect for one-time map initialization and STATIC controls
+  useEffect(() => {
     if (mapContainerRef.current && !mapRef.current) {
-      mapRef.current = L.map(mapContainerRef.current).setView([25.0330, 121.5654], 13); // Default to Taipei
+      const map = L.map(mapContainerRef.current, { zoomControl: false }).setView([INITIAL_HOME_LOCATION.lat, INITIAL_HOME_LOCATION.lon], 13);
+      mapRef.current = map;
 
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
         maxZoom: 19,
-      }).addTo(mapRef.current);
-      
-      // Use MarkerClusterGroup for nearby properties
-      nearbyMarkersRef.current = L.markerClusterGroup().addTo(mapRef.current);
-    }
+      }).addTo(map);
 
-    // --- Cleanup previous markers and controls ---
-    if (mainMarkerRef.current && mapRef.current) {
-      mapRef.current.removeLayer(mainMarkerRef.current);
+      L.control.zoom({ position: 'topright' }).addTo(map);
+      
+      // Initialize the marker cluster group once and add it to the map
+      nearbyMarkersRef.current = L.markerClusterGroup().addTo(map);
+      
+      // Create and add the STATIC Home/Recenter Control once.
+      const RecenterControl = L.Control.extend({
+          onAdd: function(mapInstance: any) {
+              const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control leaflet-control-custom');
+              container.style.backgroundColor = 'white';
+              container.style.width = '34px';
+              container.style.height = '34px';
+              container.style.display = 'flex';
+              container.style.alignItems = 'center';
+              container.style.justifyContent = 'center';
+              container.style.cursor = 'pointer';
+              container.title = '回到初始範例位置';
+              container.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width: 1.25rem; height: 1.25rem; color: #334155;"><path stroke-linecap="round" stroke-linejoin="round" d="m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" /></svg>`;
+              
+              L.DomEvent.on(container, 'click', (e: MouseEvent) => {
+                  L.DomEvent.stopPropagation(e);
+                  onSelectPropertyRef.current(INITIAL_HOME_PROPERTY);
+              });
+              
+              L.DomEvent.disableClickPropagation(container);
+              return container;
+          },
+      });
+      const homeControl = new RecenterControl({ position: 'topright' });
+      map.addControl(homeControl);
+    }
+  }, []); // Empty dependency array ensures this runs ONLY ONCE.
+
+  // A single, comprehensive effect to handle all DYNAMIC map updates
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    // Invalidate map size to fix rendering issues when the container becomes visible after animation
+    setTimeout(() => {
+        map.invalidateSize();
+    }, 150);
+
+    // --- 1. Cleanup Phase: Remove all DYNAMIC elements from the previous render ---
+    if (mainMarkerRef.current) {
+      map.removeLayer(mainMarkerRef.current);
       mainMarkerRef.current = null;
     }
     if (nearbyMarkersRef.current) {
       nearbyMarkersRef.current.clearLayers();
     }
-    if (filterControlRef.current && mapRef.current) {
-      mapRef.current.removeControl(filterControlRef.current);
+    if (filterControlRef.current) {
+      map.removeControl(filterControlRef.current);
       filterControlRef.current = null;
     }
-
-    // Update map view and all markers when property changes
-    if (mapRef.current && property) {
-      const { latitude, longitude, address, id } = property;
+    
+    // --- 2. Update Phase: Add new elements based on current props ---
+    
+    // Update map view and main marker for the selected property
+    if (property && property.latitude && property.longitude) {
+      const { latitude, longitude, address } = property;
       
-      // Fly to location only if it's different to avoid re-centering on filter change
-      const currentCenter = mapRef.current.getCenter();
+      const currentCenter = map.getCenter();
       if(Math.abs(currentCenter.lat - latitude) > 0.0001 || Math.abs(currentCenter.lng - longitude) > 0.0001) {
-        mapRef.current.flyTo([latitude, longitude], 15);
+        map.flyTo([latitude, longitude], 15);
       }
 
-      // --- Create Main Marker for selected property ---
-      mainMarkerRef.current = L.marker([latitude, longitude], { 
+      // Create and add Main Marker
+      const newMainMarker = L.marker([latitude, longitude], { 
         icon: mainPulsingIcon,
         draggable: true,
-        zIndexOffset: 1000, // Keep the main marker on top
-      }).addTo(mapRef.current);
+        zIndexOffset: 1000,
+      }).addTo(map);
+      mainMarkerRef.current = newMainMarker;
 
-      // Add hover tooltip
-      mainMarkerRef.current.bindTooltip(address, {
-        permanent: false,
-        sticky: true,
-        direction: 'top',
-        offset: L.point(0, -41)
-      });
+      newMainMarker.bindTooltip(address, { permanent: false, sticky: true, direction: 'top', offset: L.point(0, -41) });
+      
+      const mainMarkerSpecialTagHtml = isSpecialTransaction(property) ? `<br><span style="background-color: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 9999px; font-size: 10px; font-weight: bold;" title="${escapeHtml(property.remarks || '')}">特殊交易</span>` : '';
+      const streetViewLinkHtml = `<a href="https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${latitude},${longitude}" target="_blank" rel="noopener noreferrer" style="margin-top: 8px; padding: 4px 8px; font-size: 12px; background-color: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; text-decoration: none;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width: 14px; height: 14px;"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" /></svg>開啟街景</a>`;
+      newMainMarker.bindPopup(`<b>${address}</b>${mainMarkerSpecialTagHtml}${streetViewLinkHtml}`).openPopup();
 
-      mainMarkerRef.current.on('dragend', async (event: any) => {
+      newMainMarker.on('dragend', async (event: any) => {
         const marker = event.target;
         const position = marker.getLatLng();
 
+        // 1. Immediate UI feedback in main panel by creating a temporary loading property
         const loadingProperty: Property = {
-            ...(property || mockProperties[0]), // Use current property or fallback for loading state
-            id: `custom_${Date.now()}`,
-            address: '正在查詢地址...',
+            ...(property || mockProperties[0]),
+            id: `loading_drag_${Date.now()}`,
+            address: '正在查詢新位置的地址...',
             latitude: position.lat,
             longitude: position.lng,
-            district: '自訂位置',
-            price: 0,
+            district: '...',
+            price: 0, 
+            yearBuilt: 0, 
+            bedrooms: 0, 
+            bathrooms: 0, 
+            floor: '', 
+            type: '華廈',
+            imageUrl: `https://picsum.photos/seed/loading${Date.now()}/800/600`,
         };
-        onSelectProperty(loadingProperty);
+        onMapMarkerSelect(loadingProperty); // This updates the main panel's address display
+        marker.setTooltipContent('正在查詢地址...').openTooltip();
 
         try {
           const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${position.lat}&lon=${position.lng}&accept-language=zh-TW`);
           if (!response.ok) throw new Error('Reverse geocoding failed');
           const data = await response.json();
           
-          let fetchedAddress = '';
-          if (data.address) {
-            const addr = data.address;
-            // FIX: Trim whitespace from house number string before suffix check to prevent duplication.
-            const hn = addr.house_number ? String(addr.house_number).trim() : '';
-            const houseNumberPart = hn ? (hn.endsWith('號') ? hn : `${hn}號`) : '';
-
-            const addressParts = [
-              addr.city || addr.county,
-              addr.suburb || addr.city_district,
-              addr.road,
-              houseNumberPart
-            ];
-            fetchedAddress = addressParts.filter(Boolean).join('');
-          }
-          
+          let fetchedAddress = formatNominatimAddress(data);
           if (!fetchedAddress) {
-              fetchedAddress = data.display_name || `緯度: ${position.lat.toFixed(5)}, 經度: ${position.lng.toFixed(5)}`;
+              fetchedAddress = `緯度: ${position.lat.toFixed(5)}, 經度: ${position.lng.toFixed(5)}`;
           }
-
-          const baseProperty = properties.length > 0 ? properties[Math.floor(Math.random() * properties.length)] : mockProperties[0];
           
-          const customProperty: Property = {
-            ...baseProperty,
-            id: `custom_${Date.now()}`,
-            address: fetchedAddress,
-            latitude: position.lat,
-            longitude: position.lng,
-            district: data.address?.suburb || data.address?.city_district || data.address?.city || data.address?.county || '自訂位置',
-            price: 0,
-          };
+          const fetchedCity = data.address?.city || data.address?.county;
+          const fetchedDistrict = data.address?.suburb || data.address?.city_district || '自訂位置';
           
-          onSelectProperty(customProperty);
+          // 2. Trigger the location update process in the parent component
+          onLocationSelectRef.current(
+            fetchedAddress,
+            {
+              coords: { lat: position.lat, lon: position.lng },
+              district: fetchedDistrict,
+              city: fetchedCity,
+            }
+          );
+          
         } catch (error) {
           console.error("Reverse geocoding error:", error);
+          
+          // 3. Handle geocoding failure by showing an error in the main panel
           const fallbackProperty: Property = {
             ...loadingProperty,
-            address: `緯度: ${position.lat.toFixed(5)}, 經度: ${position.lng.toFixed(5)}`,
+            id: `error_drag_${Date.now()}`,
+            address: '無法查詢此位置的地址',
+            district: '未知區域',
           };
-          onSelectProperty(fallbackProperty);
+          onMapMarkerSelect(fallbackProperty); // Update main panel with the error message
+          marker.setTooltipContent('無法查詢此位置的地址').openTooltip();
         }
       });
-      
-      mainMarkerRef.current.bindPopup(`<b>${address}</b>`).openPopup();
-
-      // --- Create Nearby Markers (Filtered) ---
-      const filteredProperties = applyFilters(properties, filters);
-      filteredProperties.forEach(otherProperty => {
-        if (otherProperty.id !== id) {
-          const marker = L.marker([otherProperty.latitude, otherProperty.longitude], {
-            icon: nearbyIcon,
-          });
-
-          marker.bindPopup(`<b>${otherProperty.address}</b><br/>點擊以查看詳情`);
-
-          // Add hover tooltip for nearby markers
-          marker.bindTooltip(otherProperty.address, {
-            permanent: false,
-            sticky: true,
-            direction: 'top',
-            offset: L.point(0, -41)
-          });
-
-          marker.on('click', () => {
-            onSelectProperty(otherProperty);
-          });
-          
-          // Add marker to the cluster group
-          nearbyMarkersRef.current.addLayer(marker);
-        }
-      });
-
-      // --- Create Filter Summary Control ---
-      const activeFilters = generateFilterSummary(filters);
-      if (activeFilters.length > 0) {
-        const FilterControl = L.Control.extend({
-          onAdd: function() {
-            const div = L.DomUtil.create('div', 'leaflet-control-layers leaflet-control-layers-expanded p-2 bg-white/80 backdrop-blur-sm rounded-md shadow');
-            L.DomEvent.disableClickPropagation(div); // Prevent map clicks when interacting with the control
-            div.innerHTML = `<h3 class="text-xs font-bold mb-1 text-slate-600">目前篩選</h3><div class="flex flex-wrap gap-1" style="max-width: 200px;">${activeFilters.map(f => `<span class="text-xs bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded-full">${f}</span>`).join('')}</div>`;
-            return div;
-          },
-          onRemove: function() {}
-        });
-        filterControlRef.current = new FilterControl({ position: 'bottomright' });
-        mapRef.current.addControl(filterControlRef.current);
-      }
     }
-  }, [property, properties, filters, onSelectProperty]);
+
+    const filteredProperties = applyFilters(properties, filters);
+    filteredProperties.forEach(otherProperty => {
+      if (otherProperty.id !== property?.id && otherProperty.latitude && otherProperty.longitude) {
+        const marker = L.marker([otherProperty.latitude, otherProperty.longitude], { icon: nearbyIcon });
+        const nearbyMarkerSpecialTagHtml = isSpecialTransaction(otherProperty) ? `<span style="background-color: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 9999px; font-size: 10px; font-weight: bold;" title="${escapeHtml(otherProperty.remarks || '')}">特殊交易</span><br>` : '';
+        const nearbyStreetViewLinkHtml = `<a href="https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${otherProperty.latitude},${otherProperty.longitude}" target="_blank" rel="noopener noreferrer" style="margin-top: 8px; padding: 4px 8px; font-size: 12px; background-color: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; text-decoration: none;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width: 14px; height: 14px;"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" /></svg>開啟街景</a>`;
+        const popupContent = `<div><b>${otherProperty.address}</b><br>${nearbyMarkerSpecialTagHtml}<p style="font-size: 11px; color: #64748b; margin-top: 4px; margin-bottom: 0;">點擊地圖標記以載入此物件</p></div>${nearbyStreetViewLinkHtml}`;
+        marker.bindPopup(popupContent);
+        marker.bindTooltip(otherProperty.address, { permanent: false, sticky: true, direction: 'top', offset: L.point(0, -41) });
+        marker.on('click', () => onSelectProperty(otherProperty));
+        nearbyMarkersRef.current.addLayer(marker);
+      }
+    });
+
+    const activeFilters = generateFilterSummary(filters);
+    if (activeFilters.length > 0) {
+      const FilterControl = L.Control.extend({
+        onAdd: function() {
+          const div = L.DomUtil.create('div', 'leaflet-control-layers leaflet-control-layers-expanded p-2 bg-white/80 backdrop-blur-sm rounded-md shadow');
+          L.DomEvent.disableClickPropagation(div);
+          const tagsHtml = activeFilters.map(f => `<span class="text-xs bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded-full">${escapeHtml(f)}</span>`).join(' ');
+          div.innerHTML = `<h3 class="text-xs font-bold mb-1 text-gray-600">目前篩選</h3><div class="flex flex-wrap gap-1">${tagsHtml}</div>`;
+          return div;
+        },
+        onRemove: function() {}
+      });
+      filterControlRef.current = new FilterControl({ position: 'topright' });
+      map.addControl(filterControlRef.current);
+    }
+  }, [property, properties, filters, onMapMarkerSelect]);
 
   return (
     <>
+      <div 
+        ref={mapContainerRef} 
+        id="map" 
+        className="h-full w-full"
+      ></div>
       <style>{`
-        @keyframes pulse-animation {
-            0% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.7); }
-            70% { box-shadow: 0 0 0 15px rgba(37, 99, 235, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
+        .pulsing-main-marker {
+          animation: pulse 1.5s infinite;
+          border-radius: 50%;
         }
-        .leaflet-marker-icon.pulsing-main-marker {
-            border-radius: 50%;
-            animation: pulse-animation 2s infinite;
+        @keyframes pulse {
+          0% {
+            box-shadow: 0 0 0 0 rgba(29, 78, 216, 0.7);
+          }
+          70% {
+            box-shadow: 0 0 0 20px rgba(29, 78, 216, 0);
+          }
+          100% {
+            box-shadow: 0 0 0 0 rgba(29, 78, 216, 0);
+          }
+        }
+        .leaflet-control-zoom {
+          border: 2px solid black !important;
+          border-radius: 12px !important;
+        }
+        .leaflet-control-zoom-in, .leaflet-control-zoom-out {
+          background-color: white !important;
+          color: black !important;
+        }
+         .leaflet-control-zoom-in {
+          border-top-left-radius: 10px !important;
+          border-top-right-radius: 10px !important;
+        }
+        .leaflet-control-zoom-out {
+          border-bottom-left-radius: 10px !important;
+          border-bottom-right-radius: 10px !important;
+        }
+        .leaflet-bar a, .leaflet-bar a:hover {
+          border-bottom: 1px solid #ccc !important;
+        }
+         .leaflet-bar a:last-child {
+          border-bottom: none !important;
+        }
+        .leaflet-control-custom {
+            border: 2px solid black !important;
+            border-radius: 12px !important;
         }
       `}</style>
-      <div className="bg-white rounded-2xl shadow-lg p-4">
-        <div ref={mapContainerRef} className="h-64 md:h-80 rounded-lg" style={{ zIndex: 0 }}></div>
-      </div>
     </>
   );
 };

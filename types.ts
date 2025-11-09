@@ -1,6 +1,17 @@
+export type UserRole = '管理員' | '一般用戶' | '付費用戶';
+
+export interface User {
+  email: string;
+  password?: string; // Optional for social login
+  role: UserRole;
+  name?: string;
+  phone?: string;
+}
+
 export interface Property {
   id: string;
   address: string;
+  city?: string;
   district: string;
   type: '公寓' | '電梯大樓' | '透天厝' | '華廈';
   price: number;
@@ -9,34 +20,37 @@ export interface Property {
   bathrooms: number;
   yearBuilt: number;
   imageUrl: string;
-  latitude: number;
-  longitude: number;
+  latitude?: number;
+  longitude?: number;
   floor: string;
   transactionDate?: string;
+  remarks?: string;
 }
 
-export interface PriceTrendDataPoint {
-  label: string; // e.g., '2022 H1', '2022 H2'
-  price: number;
+export interface RealtorInfo {
+    realtorName: string;
+    branchName: string;
+    address: string;
+    analysis: string;
 }
 
 export interface ValuationReport {
   estimatedPrice: number;
   pricePerSqm: number;
-  priceTrend: PriceTrendDataPoint[];
+  confidence: string;
+  marketSummary: string;
   pros: string[];
   cons: string[];
-  marketSummary: string;
-  confidence: '高' | '中' | '低';
   amenitiesAnalysis: {
-    schools: string[];
-    transport: string[];
-    shopping: string[];
+    schools: string;
+    transport: string;
+    shopping: string;
   };
+  realtorAnalysis?: RealtorInfo[] | null;
 }
 
 export interface Filters {
-  type: string;
+  type: 'all' | '公寓' | '電梯大樓' | '透天厝' | '華廈';
   price: string;
   bedrooms: string;
   yearBuilt: string;
@@ -48,4 +62,10 @@ export interface ComparisonValuationState {
   report: ValuationReport | null;
   isLoading: boolean;
   error: string | null;
+}
+
+export interface ValuationHistoryItem {
+  property: Property;
+  report: ValuationReport;
+  date: string;
 }

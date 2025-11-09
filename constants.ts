@@ -4,21 +4,23 @@ export const mockProperties: Property[] = [
   {
     id: 'prop1',
     address: '台北市大安區羅斯福路二段79之1號',
+    city: '台北市',
     district: '大安區',
     type: '華廈',
-    price: 25000000,
-    size: 90.25, // Approx 27.3坪
-    bedrooms: 2,
-    bathrooms: 1,
-    yearBuilt: 2005,
+    price: 24880000,
+    size: 90.54, // Approx 27.4坪
+    bedrooms: 3,
+    bathrooms: 2,
+    yearBuilt: 1988,
     imageUrl: 'https://picsum.photos/seed/prop1/800/600',
     latitude: 25.0259,
     longitude: 121.5238,
-    floor: '8樓 / 14樓',
+    floor: '9樓 / 12樓',
   },
   {
     id: 'prop2',
     address: '新北市板橋區文化路一段100號',
+    city: '新北市',
     district: '板橋區',
     type: '公寓',
     price: 12000000,
@@ -34,6 +36,7 @@ export const mockProperties: Property[] = [
   {
     id: 'prop3',
     address: '台中市西屯區台灣大道三段301號',
+    city: '台中市',
     district: '西屯區',
     type: '華廈',
     price: 25000000,
@@ -49,6 +52,7 @@ export const mockProperties: Property[] = [
   {
     id: 'prop4',
     address: '高雄市左營區博愛二路777號',
+    city: '高雄市',
     district: '左營區',
     type: '透天厝',
     price: 38000000,
