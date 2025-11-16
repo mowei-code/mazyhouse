@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
+
+import React, { useState, useContext } from 'react';
 import type { Property, Filters } from '../types';
 import { FavoritesList } from './FavoritesList';
 import { RecentSearchesList } from './RecentSearchesList';
 import { ScaleIcon } from './icons/ScaleIcon';
 import { ClockIcon } from './icons/ClockIcon';
 import { HeartIcon } from './icons/HeartIcon';
-import { ListBulletIcon } from './icons/ListBulletIcon';
+import { SettingsContext } from '../contexts/SettingsContext';
 
 
 interface TabbedInfoProps {
@@ -27,11 +28,12 @@ type ActiveTab = 'market' | 'recents' | 'favorites';
 
 export const TabbedInfo: React.FC<TabbedInfoProps> = (props) => {
   const [activeTab, setActiveTab] = useState<ActiveTab>('market');
+  const { t } = useContext(SettingsContext);
 
   const tabs: { id: ActiveTab; label: string; icon: React.FC<React.SVGProps<SVGSVGElement>> }[] = [
-    { id: 'market', label: '附近行情', icon: ScaleIcon },
-    { id: 'recents', label: '最近查詢', icon: ClockIcon },
-    { id: 'favorites', label: '我的收藏', icon: HeartIcon },
+    { id: 'market', label: t('nearbyMarketPrices'), icon: ScaleIcon },
+    { id: 'recents', label: t('recentSearches'), icon: ClockIcon },
+    { id: 'favorites', label: t('myFavorites'), icon: HeartIcon },
   ];
 
   const renderContent = () => {
@@ -61,10 +63,10 @@ export const TabbedInfo: React.FC<TabbedInfoProps> = (props) => {
         );
       case 'favorites':
         return (
-           <div className="bg-white rounded-2xl shadow-lg p-6 border-2 border-black">
-                <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2 mb-4">
+           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border-2 border-black dark:border-gray-600">
+                <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2 mb-4">
                     <HeartIcon className="h-6 w-6" />
-                    我的收藏
+                    {t('myFavorites')}
                 </h3>
                  {props.favorites.length > 0 ? (
                     <div className="space-y-2">
@@ -72,15 +74,15 @@ export const TabbedInfo: React.FC<TabbedInfoProps> = (props) => {
                             <div key={fav.id} className="flex items-center gap-2">
                                 <button
                                     onClick={() => props.onSelectProperty(fav)}
-                                    className="flex-grow text-left p-3 bg-gray-100 rounded-lg hover:bg-gray-200 cursor-pointer transition-colors duration-150"
+                                    className="flex-grow text-left p-3 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 cursor-pointer transition-colors duration-150"
                                 >
-                                    <p className="text-sm font-semibold text-gray-800 truncate">{fav.address}</p>
-                                    <p className="text-xs text-gray-500">{fav.district}</p>
+                                    <p className="text-sm font-semibold text-gray-800 dark:text-gray-100 truncate">{fav.address}</p>
+                                    <p className="text-xs text-gray-500 dark:text-gray-400">{fav.district}</p>
                                 </button>
                                 <button
                                     onClick={() => props.onToggleFavorite(fav)}
-                                    className="p-2 text-red-500 hover:bg-red-100 rounded-full"
-                                    title="從收藏中移除"
+                                    className="p-2 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/20 rounded-full"
+                                    title={t('removeFromFavorites')}
                                 >
                                     <HeartIcon className="h-6 w-6" />
                                 </button>
@@ -88,8 +90,8 @@ export const TabbedInfo: React.FC<TabbedInfoProps> = (props) => {
                         ))}
                     </div>
                 ) : (
-                    <p className="text-sm text-center text-gray-500 py-4">
-                        您的收藏列表是空的。
+                    <p className="text-sm text-center text-gray-500 dark:text-gray-400 py-4">
+                        {t('yourFavoritesListEmpty')}
                     </p>
                 )}
            </div>
@@ -99,7 +101,7 @@ export const TabbedInfo: React.FC<TabbedInfoProps> = (props) => {
 
   return (
     <div>
-      <div className="border-b border-gray-300 mb-4">
+      <div className="border-b border-gray-300 dark:border-gray-700 mb-4">
         <nav className="flex space-x-2" aria-label="Tabs">
           {tabs.map(tab => (
             <button
@@ -110,8 +112,8 @@ export const TabbedInfo: React.FC<TabbedInfoProps> = (props) => {
                 transition-colors
                 ${
                   activeTab === tab.id
-                    ? 'border-b-2 border-blue-600 text-blue-600 bg-white'
-                    : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200'
+                    ? 'border-b-2 border-blue-600 text-blue-600 bg-white dark:bg-gray-800 dark:text-blue-400 dark:border-blue-500'
+                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700'
                 }
               `}
               aria-current={activeTab === tab.id ? 'page' : undefined}

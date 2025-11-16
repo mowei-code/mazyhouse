@@ -1,84 +1,128 @@
-import React, { useState, useContext } from 'react';
+
+import React, { useState, useContext, useEffect } from 'react';
 import { AuthContext } from '../contexts/AuthContext';
 import { XMarkIcon } from './icons/XMarkIcon';
 import { SparklesIcon } from './icons/SparklesIcon';
 import { GoogleIcon } from './icons/GoogleIcon';
 import { AppleIcon } from './icons/AppleIcon';
 import type { UserRole } from '../types';
+import { SettingsContext } from '../contexts/SettingsContext';
+import { APP_VERSION } from '../constants';
 
 
 export const LoginModal: React.FC = () => {
-  const { login, register, setLoginModalOpen, loginWithProvider } = useContext(AuthContext);
+  const { login, register, setLoginModalOpen } = useContext(AuthContext);
+  const { t, settings } = useContext(SettingsContext);
   
-  const [view, setView] = useState<'main' | 'social'>('main');
-  const [socialProvider, setSocialProvider] = useState<'Google' | 'Apple' | null>(null);
-
   const [isRegister, setIsRegister] = useState(false);
+  const [socialRegisterProvider, setSocialRegisterProvider] = useState<string | null>(null);
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
-  const [role, setRole] = useState<'一般用戶' | '付費用戶'>('一般用戶');
+  
+  const [captcha, setCaptcha] = useState('');
+  const [generatedCaptcha, setGeneratedCaptcha] = useState('');
+  const [registrationSuccess, setRegistrationSuccess] = useState(false);
 
   const [error, setError] = useState('');
+
+  // Generate a new captcha code and set phone prefix when entering registration mode
+  useEffect(() => {
+    if (isRegister) {
+        const newCode = Math.floor(100000 + Math.random() * 900000).toString();
+        setGeneratedCaptcha(newCode);
+        setCaptcha('');
+
+        // Set Phone Prefix based on Language
+        let prefix = '';
+        switch (settings.language) {
+            case 'zh-TW': prefix = '886-'; break;
+            case 'zh-CN': prefix = '86-'; break;
+            case 'ja': prefix = '81-'; break;
+            case 'en': prefix = '1-'; break;
+            default: prefix = '886-';
+        }
+        setPhone(prefix);
+    } else {
+        setRegistrationSuccess(false);
+    }
+  }, [isRegister, settings.language]);
 
   const handleMainSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     if (!email || !password) {
-      setError('請填寫電子郵件和密碼。');
+      setError(t('error_fillEmailPassword'));
       return;
     }
     if (isRegister) {
        if (!name.trim() || !phone.trim()) {
-        setError('請填寫姓名與連絡電話。');
+        setError(t('error_fillNamePhone'));
         return;
       }
-      const result = register({ email, password, name, phone, role });
+      
+      if (captcha !== generatedCaptcha) {
+          setError(t('captchaError'));
+          // Regenerate captcha on error to prevent brute force
+          const newCode = Math.floor(100000 + Math.random() * 900000).toString();
+          setGeneratedCaptcha(newCode);
+          setCaptcha('');
+          return;
+      }
+
+      const result = register({ email, password, name, phone });
       if (!result.success) {
-        setError(result.message);
+        setError(t(result.messageKey));
+        // Refresh captcha on failure
+        const newCode = Math.floor(100000 + Math.random() * 900000).toString();
+        setGeneratedCaptcha(newCode);
+        setCaptcha('');
+      } else {
+          setRegistrationSuccess(true);
       }
     } else {
       const success = login(email, password);
       if (!success) {
-        setError('電子郵件或密碼錯誤。');
+        setError(t('loginFailed'));
       }
     }
   };
 
   const handleSocialClick = (provider: 'Google' | 'Apple') => {
-    setSocialProvider(provider);
-    setView('social');
-    setEmail('');
+    setIsRegister(true);
+    setSocialRegisterProvider(provider);
     setError('');
+  };
+  
+  const toggleFormType = () => {
+    setIsRegister(!isRegister);
+    setSocialRegisterProvider(null);
+    setError('');
+    setRegistrationSuccess(false);
+  };
+  
+  const switchToLoginAfterSuccess = () => {
+      setIsRegister(false);
+      setSocialRegisterProvider(null);
+      setError('');
+      setRegistrationSuccess(false);
+      // Pre-fill email for convenience
+      // Password remains in state, user can just click login
   };
 
-  const handleSocialSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    if (!email) {
-      setError('請輸入您的電子郵件地址。');
-      return;
-    }
-    if (/^\S+@\S+\.\S+$/.test(email)) {
-      loginWithProvider(email);
-    } else {
-      setError('請輸入有效的電子郵件格式。');
-    }
-  };
-
-  const handleBack = () => {
-    setView('main');
-    setError('');
-    setEmail('');
-    setPassword('');
-  };
 
   const getTitle = () => {
-    if (view === 'social') {
-      return `使用 ${socialProvider} 登入`;
+    if (registrationSuccess) {
+        return t('registrationSuccess');
     }
-    return isRegister ? '註冊新帳號' : '登入會員';
+    if (isRegister) {
+      return socialRegisterProvider 
+        ? t('socialLoginTitle', { provider: socialRegisterProvider }) 
+        : t('registerTitle');
+    }
+    return t('loginTitle');
   };
 
   return (
@@ -95,172 +139,153 @@ export const LoginModal: React.FC = () => {
         </header>
 
         <div className="p-6 space-y-4">
-          {view === 'main' && (
+          {registrationSuccess ? (
+              <div className="text-center space-y-6">
+                  <div className="flex justify-center">
+                      <div className="bg-green-100 p-4 rounded-full">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-12 h-12 text-green-600">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                          </svg>
+                      </div>
+                  </div>
+                  <p className="text-gray-700">{t('registrationSuccessPrompt')}</p>
+                  <button 
+                    onClick={switchToLoginAfterSuccess}
+                    className="w-full px-4 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 transition-colors"
+                  >
+                      {t('clickToLogin')}
+                  </button>
+              </div>
+          ) : (
             <>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <button onClick={() => handleSocialClick('Google')} className="flex items-center justify-center gap-2 w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm hover:bg-gray-100 transition-colors">
-                      <GoogleIcon className="h-5 w-5" />
-                      <span className="text-sm font-medium text-gray-700">使用 Google 登入</span>
-                  </button>
-                   <button onClick={() => handleSocialClick('Apple')} className="flex items-center justify-center gap-2 w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm hover:bg-gray-100 transition-colors">
-                      <AppleIcon className="h-5 w-5" />
-                      <span className="text-sm font-medium text-gray-700">使用 Apple 登入</span>
-                  </button>
-              </div>
+                {!isRegister && (
+                    <>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <button onClick={() => handleSocialClick('Google')} className="flex items-center justify-center gap-2 w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm hover:bg-gray-100 transition-colors">
+                            <GoogleIcon className="h-5 w-5" />
+                            <span className="text-sm font-medium text-gray-700">{t('loginWithGoogle')}</span>
+                        </button>
+                        <button onClick={() => handleSocialClick('Apple')} className="flex items-center justify-center gap-2 w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm hover:bg-gray-100 transition-colors">
+                            <AppleIcon className="h-5 w-5" />
+                            <span className="text-sm font-medium text-gray-700">{t('loginWithApple')}</span>
+                        </button>
+                    </div>
 
-              <div className="relative flex items-center py-2">
-                  <div className="flex-grow border-t border-gray-300"></div>
-                  <span className="flex-shrink mx-4 text-sm text-gray-500">或</span>
-                  <div className="flex-grow border-t border-gray-300"></div>
-              </div>
+                    <div className="relative flex items-center py-2">
+                        <div className="flex-grow border-t border-gray-300"></div>
+                        <span className="flex-shrink mx-4 text-sm text-gray-500">{t('or')}</span>
+                        <div className="flex-grow border-t border-gray-300"></div>
+                    </div>
+                    </>
+                )}
 
-              <form onSubmit={handleMainSubmit} className="space-y-4">
-                {isRegister && (
-                   <>
+                <form onSubmit={handleMainSubmit} className="space-y-4">
+                    {isRegister && socialRegisterProvider && (
+                    <div className="text-sm text-center p-3 bg-gray-100 rounded-lg border border-gray-200">
+                        {t('socialRegisterPrompt', { provider: socialRegisterProvider })}
+                    </div>
+                    )}
+                    {isRegister && (
+                        <>
+                        <div>
+                            <label htmlFor="name" className="block text-sm font-medium text-gray-600 mb-1">
+                            {t('name')}
+                            </label>
+                            <input
+                            type="text"
+                            id="name"
+                            value={name}
+                            onChange={e => setName(e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                            required
+                            />
+                        </div>
+                        <div>
+                            <label htmlFor="phone"className="block text-sm font-medium text-gray-600 mb-1">
+                            {t('phone')}
+                            </label>
+                            <input
+                            type="tel"
+                            id="phone"
+                            value={phone}
+                            onChange={e => setPhone(e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                            required
+                            />
+                        </div>
+                        </>
+                    )}
                     <div>
-                        <label htmlFor="name" className="block text-sm font-medium text-gray-600 mb-1">
-                        姓名
+                        <label htmlFor="email" className="block text-sm font-medium text-gray-600 mb-1">
+                        {t('email')}
                         </label>
                         <input
-                        type="text"
-                        id="name"
-                        value={name}
-                        onChange={e => setName(e.target.value)}
+                        type="email"
+                        id="email"
+                        value={email}
+                        onChange={e => setEmail(e.target.value)}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                         required
                         />
                     </div>
                     <div>
-                        <label htmlFor="phone"className="block text-sm font-medium text-gray-600 mb-1">
-                        連絡電話 (手機)
+                        <label htmlFor="password"className="block text-sm font-medium text-gray-600 mb-1">
+                        {t('password')}
                         </label>
                         <input
-                        type="tel"
-                        id="phone"
-                        value={phone}
-                        onChange={e => setPhone(e.target.value)}
+                        type="password"
+                        id="password"
+                        value={password}
+                        onChange={e => setPassword(e.target.value)}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                         required
+                        minLength={isRegister ? 6 : undefined}
                         />
+                        {isRegister && <p className="text-xs text-gray-500 mt-1">{t('passwordMinLength')}</p>}
                     </div>
-                   </>
-                )}
-                <div>
-                    <label htmlFor="email" className="block text-sm font-medium text-gray-600 mb-1">
-                    電子郵件
-                    </label>
-                    <input
-                    type="email"
-                    id="email"
-                    value={email}
-                    onChange={e => setEmail(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                    required
-                    />
-                </div>
-                <div>
-                    <label htmlFor="password"className="block text-sm font-medium text-gray-600 mb-1">
-                    密碼
-                    </label>
-                    <input
-                    type="password"
-                    id="password"
-                    value={password}
-                    onChange={e => setPassword(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                    required
-                    minLength={isRegister ? 6 : undefined}
-                    />
-                    {isRegister && <p className="text-xs text-gray-500 mt-1">密碼長度至少需要6個字元。</p>}
-                </div>
 
-                {isRegister && (
-                  <fieldset>
-                    <legend className="block text-sm font-medium text-gray-600 mb-2">
-                      註冊身分
-                    </legend>
-                    <div className="flex gap-x-6">
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="radio"
-                          id="role-general"
-                          name="role"
-                          value="一般用戶"
-                          checked={role === '一般用戶'}
-                          onChange={() => setRole('一般用戶')}
-                          className="h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500"
-                        />
-                        <label htmlFor="role-general" className="text-sm text-gray-700">
-                          一般會員
-                        </label>
-                      </div>
-                       <div className="flex items-center gap-2">
-                        <input
-                          type="radio"
-                          id="role-paid"
-                          name="role"
-                          value="付費用戶"
-                          checked={role === '付費用戶'}
-                          onChange={() => setRole('付費用戶')}
-                          className="h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500"
-                        />
-                        <label htmlFor="role-paid" className="text-sm text-gray-700">
-                          付費會員
-                        </label>
-                      </div>
-                    </div>
-                  </fieldset>
-                )}
+                    {isRegister && (
+                        <div className="flex items-end gap-3">
+                            <div className="flex-grow">
+                                <label htmlFor="captcha" className="block text-sm font-medium text-gray-600 mb-1">
+                                    {t('captcha')}
+                                </label>
+                                <input
+                                    type="text"
+                                    id="captcha"
+                                    value={captcha}
+                                    onChange={e => setCaptcha(e.target.value)}
+                                    placeholder={t('captchaPlaceholder')}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                    required
+                                    maxLength={6}
+                                />
+                            </div>
+                            <div className="flex-shrink-0 h-[42px] px-4 bg-gray-200 border border-gray-300 rounded-lg flex items-center justify-center select-none font-mono text-lg font-bold text-gray-600 tracking-widest">
+                                {generatedCaptcha}
+                            </div>
+                        </div>
+                    )}
 
-                {error && <p className="text-sm text-red-600 bg-red-50 p-3 rounded-lg">{error}</p>}
+                    {error && <p className="text-sm text-red-600 bg-red-50 p-3 rounded-lg">{error}</p>}
 
-                <button type="submit" className="w-full px-4 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 transition-colors">
-                    {isRegister ? '註冊' : '登入'}
-                </button>
-
-                <p className="text-sm text-center">
-                    {isRegister ? '已經有帳號了？' : '還沒有帳號？'}
-                    <button type="button" onClick={() => { setIsRegister(!isRegister); setError(''); }} className="font-medium text-blue-600 hover:underline ml-1">
-                    {isRegister ? '點此登入' : '點此註冊'}
+                    <button type="submit" className="w-full px-4 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 transition-colors">
+                        {t(isRegister ? 'register' : 'login')}
                     </button>
-                </p>
-              </form>
-            </>
-          )}
 
-          {view === 'social' && socialProvider && (
-            <>
-              <div className="text-center">
-                <p className="text-sm text-gray-500">
-                  請輸入您的 {socialProvider} 電子郵件地址以繼續。
-                </p>
-              </div>
-              <form onSubmit={handleSocialSubmit} className="space-y-4">
-                <div>
-                  <label htmlFor="social-email" className="block text-sm font-medium text-gray-600 mb-1">
-                    電子郵件
-                  </label>
-                  <input
-                    type="email"
-                    id="social-email"
-                    value={email}
-                    onChange={e => setEmail(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                    required
-                    autoFocus
-                  />
-                </div>
+                    <p className="text-sm text-center">
+                        {t(isRegister ? 'alreadyHaveAccount' : 'noAccountYet')}
+                        <button type="button" onClick={toggleFormType} className="font-medium text-blue-600 hover:underline ml-1">
+                        {t(isRegister ? 'clickToLogin' : 'clickToRegister')}
+                        </button>
+                    </p>
+                </form>
                 
-                {error && <p className="text-sm text-red-600 bg-red-50 p-3 rounded-lg">{error}</p>}
-
-                <button type="submit" className="w-full px-4 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 transition-colors">
-                  繼續
-                </button>
-
-                <button type="button" onClick={handleBack} className="w-full px-4 py-2 text-sm text-gray-600 font-medium hover:bg-gray-100 rounded-lg transition-colors">
-                  返回
-                </button>
-              </form>
+                <div className="mt-4 pt-4 border-t border-gray-100 text-center">
+                    <p className="text-xs text-gray-400 font-mono">
+                        {t('appTitle')} {APP_VERSION}
+                    </p>
+                </div>
             </>
           )}
         </div>

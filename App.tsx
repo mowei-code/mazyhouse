@@ -1,39 +1,32 @@
+
 import React, { useState, useEffect, useCallback, useContext } from 'react';
 import type { Property, ValuationReport, Filters, ComparisonValuationState, ValuationHistoryItem } from './types';
 import { getValuation } from './services/geminiService';
-import { mockProperties, initialFilters } from './constants';
+import { initialFilters, getMockProperties, APP_VERSION, APP_RELEASE_DATE } from './constants';
 import { MapView } from './components/MapView';
 import { ComparisonView } from './components/ComparisonView';
-import { sanitizeAddressForGeocoding } from './utils';
-import { getLocalTransactions, fetchLiveNearbyTransactions } from './services/realEstateService';
+import { sanitizeAddressForGeocoding, generateRandomPropertyDetails, parseTaiwanAddress } from './utils';
+import { getLocalTransactions } from './services/realEstateService';
 import { ValuationHistory } from './components/ValuationHistory';
 import { AuthProvider, AuthContext } from './contexts/AuthContext';
+import { SettingsProvider, SettingsContext } from './contexts/SettingsContext';
 import { LoginModal } from './components/LoginModal';
 import { AdminPanel } from './components/AdminPanel';
+import { SettingsModal } from './components/SettingsModal';
 import { MainPanel } from './components/MainPanel';
 import { BuildingOfficeIcon } from './components/icons/BuildingOfficeIcon';
-import { MapIcon } from './components/icons/MapIcon';
-import { XMarkIcon } from './components/icons/XMarkIcon';
+import { InstructionManual } from './components/InstructionManual';
 
-
-const defaultPropertyData = {
-  price: 15000000,
-  size: 85,
-  yearBuilt: 2005,
-  type: '華廈' as const,
-  bedrooms: 3,
-  bathrooms: 2,
-  floor: '7樓 / 15樓',
-};
 
 const AppContent: React.FC = () => {
-  const [selectedProperty, setSelectedProperty] = useState<Property | null>(mockProperties[0]);
+  const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
   const [valuation, setValuation] = useState<ValuationReport | null>(null);
   const [favorites, setFavorites] = useState<Property[]>([]);
   const [recentSearches, setRecentSearches] = useState<Property[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [isValuating, setIsValuating] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState<string>('');
   const [transactionList, setTransactionList] = useState<Property[]>([]);
   const [filters, setFilters] = useState<Filters>(initialFilters);
   const [comparisonList, setComparisonList] = useState<Property[]>([]);
@@ -42,13 +35,16 @@ const AppContent: React.FC = () => {
   const [valuationHistory, setValuationHistory] = useState<ValuationHistoryItem[]>([]);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isMapOpen, setIsMapOpen] = useState(false);
+  const [isInstructionManualOpen, setInstructionManualOpen] = useState(false);
 
   const { currentUser, isLoginModalOpen, isAdminPanelOpen, setLoginModalOpen } = useContext(AuthContext);
+  const { settings, getApiKey, t, setSettingsModalOpen } = useContext(SettingsContext);
 
   useEffect(() => {
-    const resetAndInitialize = async () => {
+    const resetAndInitialize = () => {
+        const currentMockProperties = getMockProperties(settings.language);
         // Reset transient state to defaults
-        setSelectedProperty(mockProperties[0]);
+        setSelectedProperty(currentMockProperties[0]);
         setValuation(null);
         setIsLoading(false);
         setError(null);
@@ -89,31 +85,27 @@ const AppContent: React.FC = () => {
         }
 
         // Initialize default transaction data for the default property
-        const defaultProp = mockProperties[0];
+        const defaultProp = currentMockProperties[0];
         if (defaultProp) {
             try {
                 const { city, district } = defaultProp;
                 if (city && district) {
-                    const localData = getLocalTransactions(city, district);
+                    const localData = getLocalTransactions(city, district, settings.language);
                     setTransactionList([defaultProp, ...localData]);
-                    const liveData = await fetchLiveNearbyTransactions(city, district);
-                    if (liveData) {
-                        setTransactionList([defaultProp, ...liveData]);
-                    }
                 } else {
                      setTransactionList([defaultProp]);
                 }
             } catch (e) {
                 console.error("Initialization failed during transaction fetch:", e);
-                if (mockProperties[0]) {
-                   setTransactionList([mockProperties[0]]);
+                if (currentMockProperties[0]) {
+                   setTransactionList([currentMockProperties[0]]);
                 }
             }
         }
     };
     
     resetAndInitialize();
-  }, [currentUser]);
+  }, [currentUser, settings.language]);
 
   const handleFilterChange = useCallback((name: string, value: string) => {
     setFilters(prev => ({ ...prev, [name]: value }));
@@ -123,7 +115,7 @@ const AppContent: React.FC = () => {
     setFilters(initialFilters);
   }, []);
 
-  const handleLocationSelect = useCallback(async (
+  const handleLocationSelect = useCallback((
     address: string,
     details: { coords: { lat: number; lon: number }; district: string; city?: string }
   ) => {
@@ -134,7 +126,7 @@ const AppContent: React.FC = () => {
 
     const { coords, district, city } = details;
     const propertyToUpdate: Property = {
-      ...defaultPropertyData,
+      ...generateRandomPropertyDetails(),
       id: `prop_select_${Date.now()}`,
       address: address,
       latitude: coords.lat,
@@ -142,42 +134,61 @@ const AppContent: React.FC = () => {
       city: city,
       district: district,
       imageUrl: `https://picsum.photos/seed/${Date.now()}/800/600`,
+      price: 0,
     };
 
     setSelectedProperty(propertyToUpdate);
     
     if (city && district) {
-      const localData = getLocalTransactions(city, district);
+      const localData = getLocalTransactions(city, district, settings.language);
       setTransactionList([propertyToUpdate, ...localData]);
-      const liveData = await fetchLiveNearbyTransactions(city, district);
-      if (liveData) {
-        setTransactionList([propertyToUpdate, ...liveData]);
-      }
     } else {
       setTransactionList([propertyToUpdate]);
     }
-    
     setIsLoading(false);
-  }, []);
+  }, [settings.language]);
   
   const handleSearch = useCallback(async (
     address: string,
     reference: string,
     details?: { coords: { lat: number; lon: number }; district: string; city?: string },
-    customInputs?: { size?: number; pricePerPing?: number; floor?: string }
+    customInputs?: { size?: number; pricePerPing?: number; floor?: string; customRequest?: string }
   ) => {
     setError(null);
     setValuation(null);
     setIsValuating(true);
     setIsLoading(true);
     setTransactionList([]);
+    setLoadingMessage(t('valuating_init'));
+
+    const apiKey = getApiKey();
+
+    if (!apiKey) {
+      const errorMessage = (currentUser?.role === '管理員' || currentUser?.role === '付費用戶')
+        ? t('apiKeyWarning')
+        : t('adminApiKeySetupRequired');
+      setError(errorMessage);
+      setIsLoading(false);
+      setIsValuating(false);
+      setLoadingMessage('');
+      return;
+    }
 
     let propertyToValuate: Property | null = null;
+    
+    // Attempt to parse the address string for details (City, District, Floor)
+    const parsedLocation = parseTaiwanAddress(address);
+    
+    // Prepare implicit custom inputs (floor from address)
+    let effectiveCustomInputs = customInputs ? { ...customInputs } : {};
+    if (!effectiveCustomInputs.floor && parsedLocation.floor) {
+        effectiveCustomInputs.floor = parsedLocation.floor;
+    }
       
     if (details) {
         const { coords, district, city } = details;
         propertyToValuate = {
-          ...defaultPropertyData,
+          ...generateRandomPropertyDetails(),
           id: `prop_${Date.now()}`,
           address: address,
           latitude: coords.lat,
@@ -185,9 +196,11 @@ const AppContent: React.FC = () => {
           city: city,
           district: district,
           imageUrl: `https://picsum.photos/seed/${Date.now()}/800/600`,
+          price: 0,
         };
     } else {
-        propertyToValuate = mockProperties.find(p => 
+        const currentMockProperties = getMockProperties(settings.language);
+        propertyToValuate = currentMockProperties.find(p => 
           p.address.trim().toLowerCase() === address.trim().toLowerCase()
         ) || null;
           
@@ -200,6 +213,7 @@ const AppContent: React.FC = () => {
           if (isSearchingForSelectedProperty) {
             propertyToValuate = selectedProperty;
           } else {
+            setLoadingMessage(t('valuating_geocoding'));
             try {
               const sanitizedAddress = sanitizeAddressForGeocoding(address);
               let response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(sanitizedAddress)}&countrycodes=tw&addressdetails=1&accept-language=zh-TW`);
@@ -235,19 +249,31 @@ const AppContent: React.FC = () => {
                       ];
                       const tempAddress = addressParts.filter(Boolean).join('');
                       if (tempAddress) {
-                          displayAddress = tempAddress;
+                          // Keep original input for display if it's more detailed (e.g. includes floor)
+                          if (address.length > tempAddress.length) {
+                             displayAddress = address;
+                          } else {
+                             displayAddress = tempAddress;
+                          }
                       }
                   }
 
+                  // Determine District: Prioritize User Input Parsing -> Geocoding Result -> Fallback
+                  // Geocoding services can sometimes return incorrect districts for border areas or incomplete addresses.
+                  // If the user explicitly typed "Da'an District", we should respect that over a potential geocode error.
+                  const effectiveCity = parsedLocation.city || addrDetails.city || addrDetails.county;
+                  const effectiveDistrict = parsedLocation.district || addrDetails.suburb || addrDetails.city_district || '未知區域';
+
                   propertyToValuate = {
-                      ...defaultPropertyData,
+                      ...generateRandomPropertyDetails(),
                       id: `prop_${Date.now()}`,
                       address: displayAddress,
                       latitude: parseFloat(lat),
                       longitude: parseFloat(lon),
-                      city: addrDetails.city || addrDetails.county,
-                      district: addrDetails.suburb || addrDetails.city_district || '未知區域',
+                      city: effectiveCity,
+                      district: effectiveDistrict,
                       imageUrl: `https://picsum.photos/seed/${Date.now()}/800/600`,
+                      price: 0,
                   };
 
                   if (isBroadSearch) {
@@ -261,7 +287,7 @@ const AppContent: React.FC = () => {
               const errorMessage = geoError instanceof Error ? geoError.message : '地址定位時發生未知錯誤。';
               setError(errorMessage);
               const tempErrorProperty: Property = {
-                ...(mockProperties[0]),
+                ...(getMockProperties(settings.language)[0]),
                 id: `error_${Date.now()}`,
                 address: address,
               };
@@ -269,6 +295,7 @@ const AppContent: React.FC = () => {
               setTransactionList([tempErrorProperty]);
               setIsLoading(false);
               setIsValuating(false);
+              setLoadingMessage('');
               return; 
             }
           }
@@ -280,6 +307,7 @@ const AppContent: React.FC = () => {
         setTransactionList([]);
         setIsLoading(false);
         setIsValuating(false);
+        setLoadingMessage('');
         return;
     }
 
@@ -297,7 +325,22 @@ const AppContent: React.FC = () => {
     
     const performValuation = async (contextTransactions: Property[]) => {
       try {
-        const report = await getValuation(propertyToValuate!, contextTransactions.slice(0, 10), reference, customInputs);
+        const getLoadingMessageForReference = (refKey: string): string => {
+          const key = `valuating_${refKey}`;
+          const translated = t(key);
+          return translated !== key ? translated : t('valuating_ai');
+        };
+        setLoadingMessage(getLoadingMessageForReference(reference));
+        
+        const report = await getValuation(
+            propertyToValuate!, 
+            contextTransactions.slice(0, 10), 
+            t(reference), 
+            apiKey, 
+            settings.language, 
+            reference, 
+            Object.keys(effectiveCustomInputs).length > 0 ? effectiveCustomInputs : undefined
+        );
         setValuation(report);
         const newHistoryItem: ValuationHistoryItem = {
           property: propertyToValuate!,
@@ -318,36 +361,28 @@ const AppContent: React.FC = () => {
       } finally {
         setIsLoading(false);
         setIsValuating(false);
+        setLoadingMessage('');
       }
     };
 
     const { city, district } = propertyToValuate;
 
     if (city && district) {
-      const localData = getLocalTransactions(city, district);
-      setTransactionList([propertyToValuate, ...localData]);
-      const liveData = await fetchLiveNearbyTransactions(city, district);
-      if (liveData) {
-        const addressMatch = propertyToValuate.address.match(/^(.*[路街段巷弄])/);
-        const baseAddress = addressMatch ? addressMatch[1] : null;
-        const sortedLiveData = baseAddress 
-            ? [
-                ...liveData.filter(p => p.address.startsWith(baseAddress)),
-                ...liveData.filter(p => !p.address.startsWith(baseAddress))
-              ]
-            : liveData;
-        setTransactionList([propertyToValuate, ...sortedLiveData]);
-        await performValuation(sortedLiveData);
-      } else {
-        await performValuation(localData);
-      }
+      setLoadingMessage(t('valuating_local_data'));
+      const localData = getLocalTransactions(city, district, settings.language);
+      const initialTransactions = [propertyToValuate, ...localData];
+      setTransactionList(initialTransactions);
+
+      await performValuation(localData);
+      
     } else {
       setTransactionList([propertyToValuate]);
       await performValuation([]);
     }
-  }, [selectedProperty, currentUser]);
+  }, [selectedProperty, currentUser, getApiKey, settings.language, t]);
 
   const handleToggleCompare = useCallback(async (property: Property) => {
+    const apiKey = getApiKey();
     setComparisonList(prev => {
       const isInList = prev.some(p => p.id === property.id);
       if (isInList) {
@@ -358,17 +393,18 @@ const AppContent: React.FC = () => {
             return prev;
         }
         if (!comparisonValuations[property.id] || comparisonValuations[property.id].error) {
+           if (!apiKey) {
+                alert('請先在設定中提供您的 Gemini API Key 以進行比較估價。');
+                return prev;
+           }
            setComparisonValuations(prevVals => ({
               ...prevVals,
               [property.id]: { report: null, isLoading: true, error: null }
             }));
            const { city, district } = property;
            if (city && district) {
-                fetchLiveNearbyTransactions(city, district)
-                .then(transactions => {
-                    const contextData = transactions || getLocalTransactions(city, district);
-                    return getValuation(property, contextData.slice(0, 10), '綜合市場因素');
-                })
+                const contextData = getLocalTransactions(city, district, settings.language);
+                getValuation(property, contextData.slice(0, 10), t('comprehensiveMarketFactors'), apiKey, settings.language, 'comprehensiveMarketFactors')
                 .then(report => {
                     setComparisonValuations(prevVals => ({
                        ...prevVals,
@@ -387,8 +423,8 @@ const AppContent: React.FC = () => {
         return [...prev, property];
       }
     });
-  }, [comparisonValuations]);
-
+  }, [comparisonValuations, getApiKey, settings.language, t]);
+  
   const handleClearCompare = () => setComparisonList([]);
 
   const toggleFavorite = (property: Property) => {
@@ -411,13 +447,8 @@ const AppContent: React.FC = () => {
     
     const { city, district } = property;
     if (city && district) {
-        const localData = getLocalTransactions(city, district);
+        const localData = getLocalTransactions(city, district, settings.language);
         setTransactionList([property, ...localData]);
-        fetchLiveNearbyTransactions(city, district).then(liveData => {
-            if (liveData) {
-                setTransactionList([property, ...liveData]);
-            }
-        });
     } else {
          setTransactionList([property]);
     }
@@ -432,7 +463,7 @@ const AppContent: React.FC = () => {
   const handleSelectRecent = (property: Property) => {
     handleSearch(
       property.address, 
-      '綜合市場因素', 
+      'comprehensiveMarketFactors', 
       property.latitude && property.longitude 
         ? { coords: { lat: property.latitude, lon: property.longitude }, city: property.city, district: property.district } 
         : undefined
@@ -442,7 +473,7 @@ const AppContent: React.FC = () => {
   const handleSelectHistory = (property: Property) => {
     handleSearch(
       property.address,
-      '實價登錄',
+      'actualTransactions',
       property.latitude && property.longitude
         ? { coords: { lat: property.latitude, lon: property.longitude }, city: property.city, district: property.district }
         : undefined
@@ -451,9 +482,9 @@ const AppContent: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 font-sans flex flex-col">
+    <div className="min-h-screen flex flex-col">
       {currentUser ? (
-        <main className="flex-grow p-4 max-w-4xl mx-auto w-full">
+        <main className="flex-grow p-4 sm:p-6 max-w-5xl mx-auto w-full pt-6">
           <MainPanel 
             onSearch={handleSearch}
             onLocationSelect={handleLocationSelect}
@@ -476,40 +507,39 @@ const AppContent: React.FC = () => {
             onSelectRecent={handleSelectRecent}
             onCompareClick={() => setIsComparing(true)}
             onOpenMap={() => setIsMapOpen(true)}
+            onOpenInstructionManual={() => setInstructionManualOpen(true)}
             currentUser={currentUser}
+            onOpenSettings={() => setSettingsModalOpen(true)}
+            loadingMessage={loadingMessage}
           />
         </main>
       ) : (
         <main className="flex-grow flex flex-col items-center justify-center p-4 text-center">
-            <div className="bg-white p-10 rounded-2xl shadow-lg border-2 border-black max-w-lg">
-                <div className="mx-auto bg-blue-600 p-4 rounded-lg inline-block mb-6">
+            <div className="bg-white/80 backdrop-blur-md dark:bg-slate-800/80 p-10 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-white/20 dark:border-slate-700 max-w-lg animate-fade-in-up">
+                <div className="mx-auto bg-gradient-to-tr from-blue-600 to-indigo-600 p-4 rounded-2xl shadow-lg shadow-blue-500/30 inline-block mb-6 transform hover:scale-110 transition-transform duration-300">
                     <BuildingOfficeIcon className="h-10 w-10 text-white" />
                 </div>
-                <h2 className="text-2xl font-bold text-gray-800 mb-2">歡迎使用 AI 房產估價師</h2>
-                <p className="text-gray-600 mb-6">
-                    請登入或註冊帳號，以開始探索即時房產估價、市場趨勢分析以及更多強大功能。
+                <h2 className="text-3xl font-bold text-slate-800 dark:text-slate-100 mb-3 tracking-tight">{t('welcomeMessageTitle')}</h2>
+                <p className="text-slate-600 dark:text-slate-300 mb-8 leading-relaxed">
+                    {t('welcomeMessageBody')}
                 </p>
                 <button
                     onClick={() => setLoginModalOpen(true)}
-                    className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 transition-colors"
+                    className="px-8 py-3.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold rounded-xl shadow-lg shadow-blue-500/30 hover:shadow-blue-500/40 hover:-translate-y-0.5 transition-all duration-200 w-full sm:w-auto"
                 >
-                    登入 / 註冊
+                    {t('loginOrRegister')}
                 </button>
+                <p style={{ fontSize: '10px' }} className="mt-6 text-slate-400 dark:text-slate-500">
+                    &copy; Mazylab studio 2025... {APP_VERSION}
+                </p>
             </div>
         </main>
       )}
       
       {isMapOpen && currentUser && (
         <div 
-            className="fixed top-20 right-4 bottom-4 z-40 bg-white rounded-2xl shadow-2xl w-[90vw] md:w-[60vw] lg:w-[45vw] xl:w-[40%] max-w-[700px] flex flex-col overflow-hidden border-2 border-black animate-slide-in-right"
+            className="fixed top-20 right-4 bottom-4 z-40 bg-white/90 backdrop-blur-xl dark:bg-slate-800/90 rounded-3xl shadow-2xl w-[90vw] md:w-[60vw] lg:w-[45vw] xl:w-[40%] max-w-[700px] flex flex-col overflow-hidden border border-white/20 dark:border-slate-700 animate-slide-in-right"
         >
-            <button 
-                onClick={() => setIsMapOpen(false)} 
-                className="absolute top-3 right-3 z-[1001] p-2 bg-white/80 rounded-full shadow-lg hover:bg-gray-100 transition-colors"
-                aria-label="關閉地圖"
-            >
-                <XMarkIcon className="h-6 w-6 text-gray-800" />
-            </button>
             <MapView
                 property={selectedProperty}
                 properties={transactionList}
@@ -517,6 +547,7 @@ const AppContent: React.FC = () => {
                 onSelectProperty={selectPropertyFromList}
                 onMapMarkerSelect={handleMapMarkerSelect}
                 onLocationSelect={handleLocationSelect}
+                onClose={() => setIsMapOpen(false)}
             />
         </div>
       )}
@@ -537,8 +568,15 @@ const AppContent: React.FC = () => {
           onSelect={handleSelectHistory}
         />
       )}
+      {isInstructionManualOpen && (
+        <InstructionManual
+          isOpen={isInstructionManualOpen}
+          onClose={() => setInstructionManualOpen(false)}
+        />
+      )}
       {isLoginModalOpen && <LoginModal />}
       {isAdminPanelOpen && currentUser?.role === '管理員' && <AdminPanel />}
+      {currentUser && <SettingsModal />}
        <style>{`
         @keyframes slide-in-right {
           from { 
@@ -551,7 +589,27 @@ const AppContent: React.FC = () => {
           }
         }
         .animate-slide-in-right {
-          animation: slide-in-right 0.3s ease-out forwards;
+          animation: slide-in-right 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+        @keyframes fade-in-up {
+          from {
+            opacity: 0;
+            transform: translateY(20px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        .animate-fade-in-up {
+          animation: fade-in-up 0.6s ease-out forwards;
+        }
+         @keyframes fade-in {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        .animate-fade-in {
+          animation: fade-in 0.3s ease-out forwards;
         }
       `}</style>
     </div>
@@ -560,7 +618,9 @@ const AppContent: React.FC = () => {
 
 const App: React.FC = () => (
   <AuthProvider>
-    <AppContent />
+    <SettingsProvider>
+      <AppContent />
+    </SettingsProvider>
   </AuthProvider>
 );
 

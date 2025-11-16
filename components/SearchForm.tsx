@@ -1,15 +1,17 @@
-import React, { useState, useEffect } from 'react';
+
+import React, { useState, useEffect, useContext } from 'react';
 import { MapPinIcon } from './icons/MapPinIcon';
 import { SparklesIcon } from './icons/SparklesIcon';
 import { formatNominatimAddress } from '../utils';
 import type { User } from '../types';
+import { SettingsContext } from '../contexts/SettingsContext';
 
 interface SearchFormProps {
   onSearch: (
     address: string,
     reference: string,
     details?: { coords: { lat: number; lon: number }; district: string; city?: string },
-    customInputs?: { size?: number; pricePerPing?: number; floor?: string }
+    customInputs?: { size?: number; pricePerPing?: number; floor?: string; customRequest?: string }
   ) => void;
   onLocationSelect: (
     address: string,
@@ -20,46 +22,81 @@ interface SearchFormProps {
   currentUser: User | null;
 }
 
-const valuationReferences = [
-    { value: '綜合市場因素', label: '綜合市場因素' },
-    { value: '實價登錄', label: '實價登錄' },
-    { value: '房屋仲介觀點', label: '房屋仲介觀點' },
-    { value: '真實坪數', label: '真實坪數' },
-];
-
-const restrictedReferences = ['實價登錄', '房屋仲介觀點', '真實坪數'];
-
 export const SearchForm: React.FC<SearchFormProps> = ({ onSearch, onLocationSelect, isLoading, initialAddress, currentUser }) => {
+  const { getApiKey, setSettingsModalOpen, t, settings } = useContext(SettingsContext);
+
+  const valuationReferences = [
+    { value: 'comprehensiveMarketFactors', label: t('comprehensiveMarketFactors') },
+    { value: 'actualTransactions', label: t('actualTransactions') },
+    { value: 'realtorPerspective', label: t('realtorPerspective') },
+    { value: 'actualPingSize', label: t('actualPingSize') },
+    { value: 'regionalDevelopmentPotential', label: t('regionalDevelopmentPotential') },
+    { value: 'foreclosureInfo', label: t('foreclosureInfo') },
+    { value: 'rentalYieldAnalysis', label: t('rentalYieldAnalysis') },
+    { value: 'bankAppraisalModel', label: t('bankAppraisalModel') },
+    { value: 'urbanRenewalPotential', label: t('urbanRenewalPotential') },
+    { value: 'commercialValue', label: t('commercialValue') },
+    { value: 'structureSafety', label: t('structureSafety') },
+    { value: 'customValuation', label: t('customValuation') },
+  ];
+
+  const restrictedReferences = [
+      'actualTransactions', 
+      'realtorPerspective', 
+      'actualPingSize',
+      'regionalDevelopmentPotential',
+      'foreclosureInfo',
+      'rentalYieldAnalysis',
+      'bankAppraisalModel',
+      'urbanRenewalPotential',
+      'commercialValue',
+      'structureSafety',
+      'customValuation',
+  ];
+
   const [address, setAddress] = useState(initialAddress);
   const [reference, setReference] = useState(valuationReferences[0].value);
   const [geolocationError, setGeolocationError] = useState<string | null>(null);
   const [customSize, setCustomSize] = useState('');
   const [customPricePerPing, setCustomPricePerPing] = useState('');
   const [customFloor, setCustomFloor] = useState('');
+  const [customRequest, setCustomRequest] = useState('');
+  const [showApiKeyWarning, setShowApiKeyWarning] = useState(false);
 
   const userHasPermission = currentUser?.role === '管理員' || currentUser?.role === '付費用戶';
+  const hasApiKey = !!getApiKey();
 
   useEffect(() => {
     setAddress(initialAddress);
   }, [initialAddress]);
 
-  // Reset reference if the current one becomes disabled (e.g., on logout)
+  // Reset reference if the current one becomes disabled
   useEffect(() => {
-    if (restrictedReferences.includes(reference) && !userHasPermission) {
+    const isRestrictedAndNoPerms = restrictedReferences.includes(reference) && !userHasPermission;
+    if (!hasApiKey || isRestrictedAndNoPerms) {
       setReference(valuationReferences[0].value);
     }
-  }, [userHasPermission, reference]);
+  }, [userHasPermission, reference, hasApiKey, t]);
+
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setGeolocationError(null);
+    setShowApiKeyWarning(false);
+    
+    if (!getApiKey()) {
+        setShowApiKeyWarning(true);
+        return;
+    }
+
     if (address.trim()) {
-      let customInputs: { size?: number; pricePerPing?: number; floor?: string } = {};
-      if (reference === '真實坪數') {
+      let customInputs: { size?: number; pricePerPing?: number; floor?: string; customRequest?: string } = {};
+      
+      if (reference === 'actualPingSize') {
         const sizeNum = parseFloat(customSize);
         const priceNum = parseFloat(customPricePerPing);
         if (!isNaN(sizeNum) && sizeNum > 0) {
-          customInputs.size = sizeNum;
+          customInputs.size = sizeNum * 3.30579; // Convert ping to sqm
         }
         if (!isNaN(priceNum) && priceNum > 0) {
           customInputs.pricePerPing = priceNum;
@@ -68,6 +105,16 @@ export const SearchForm: React.FC<SearchFormProps> = ({ onSearch, onLocationSele
             customInputs.floor = customFloor.trim();
         }
       }
+
+      if (reference === 'customValuation') {
+         if (customRequest.trim() !== '') {
+            customInputs.customRequest = customRequest.trim();
+         } else {
+            // If empty, fallback to generic comprehensive if they didn't type anything, or just send empty string and let prompt handle it (prompt might be generic).
+            // Better to require it? For now let's just pass it.
+         }
+      }
+
       onSearch(address.trim(), reference, undefined, Object.keys(customInputs).length > 0 ? customInputs : undefined);
     }
   };
@@ -113,83 +160,111 @@ export const SearchForm: React.FC<SearchFormProps> = ({ onSearch, onLocationSele
             });
           } catch (error) {
               console.error("Geolocation reverse geocoding error:", error);
-              setGeolocationError("無法將目前位置轉換為地址。");
+              setGeolocationError(t('reverseGeocodingError'));
           }
         },
         (error: GeolocationPositionError) => {
           console.error(`Geolocation error: ${error.message} (code: ${error.code})`);
-          let errorMessage: string;
+          let errorMessageKey: string;
           switch (error.code) {
             case error.PERMISSION_DENIED:
-              errorMessage = "您已拒絕位置授權，請至瀏覽器設定開啟權限後再試。";
+              errorMessageKey = "geolocationErrorPermissionDenied";
               break;
             case error.POSITION_UNAVAILABLE:
-              errorMessage = "無法偵測目前位置，請確認裝置定位功能已開啟。";
+              errorMessageKey = "geolocationErrorPositionUnavailable";
               break;
             case error.TIMEOUT:
-              errorMessage = "取得位置資訊已逾時，請稍後再試。";
+              errorMessageKey = "geolocationErrorTimeout";
               break;
             default:
-              errorMessage = "發生未知的定位錯誤，請稍後再試。";
+              errorMessageKey = "geolocationErrorUnknown";
               break;
           }
-          setGeolocationError(errorMessage);
+          setGeolocationError(t(errorMessageKey));
         },
         options
       );
     } else {
-      setGeolocationError("您的瀏覽器不支援地理位置功能。");
+      setGeolocationError(t("geolocationErrorUnsupported"));
     }
   };
 
   return (
-    <form onSubmit={handleSubmit} className="mb-6">
-      <div className="flex flex-col gap-4">
-        {/* Address Input and Geolocation Button */}
-        <div className="relative flex-grow">
-          <label htmlFor="address-search" className="sr-only">地址搜尋</label>
-          <input
-            id="address-search"
-            type="text"
-            value={address}
-            onChange={(e) => {
-              setAddress(e.target.value);
-              setGeolocationError(null);
-            }}
-            placeholder="例如：台北市大安區信義路四段1號"
-            className="w-full pl-4 pr-12 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-150 bg-white"
-            disabled={isLoading}
-          />
-          <button
-            type="button"
-            onClick={handleGeolocation}
-            disabled={isLoading}
-            className="absolute inset-y-0 right-0 px-3 flex items-center text-gray-500 hover:text-blue-600 transition-colors"
-            title="使用目前位置"
-            aria-label="使用目前位置"
-          >
-            <MapPinIcon className="h-5 w-5" />
-          </button>
+    <form onSubmit={handleSubmit} className="mb-8">
+      <div className="flex flex-col gap-6">
+        {/* Hero Address Input */}
+        <div className="relative group">
+          <label htmlFor="address-search" className="sr-only">{t('addressSearchPlaceholder')}</label>
+          <div className="relative flex items-center">
+             <input
+                id="address-search"
+                type="text"
+                value={address}
+                onChange={(e) => {
+                  setAddress(e.target.value);
+                  setGeolocationError(null);
+                }}
+                placeholder={t('addressSearchPlaceholder')}
+                className="w-full pl-6 pr-14 py-4 text-lg border-2 border-slate-200 dark:border-slate-600 rounded-2xl focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-300 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm dark:text-white shadow-sm group-hover:shadow-md"
+                disabled={isLoading}
+              />
+              <button
+                type="button"
+                onClick={handleGeolocation}
+                disabled={isLoading}
+                className="absolute right-3 p-2.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-slate-700 rounded-xl transition-colors"
+                title={t('useCurrentLocation')}
+                aria-label={t('useCurrentLocation')}
+              >
+                <MapPinIcon className="h-6 w-6" />
+              </button>
+          </div>
         </div>
 
-        {/* Valuation Reference Radio Buttons */}
+        {/* Valuation Reference Chips */}
         <fieldset>
-          <legend className="block text-sm font-medium text-gray-600 mb-2">
-            估價參考基準
-          </legend>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+           <div className="mb-3 px-1">
+              <legend className="block text-lg font-bold text-slate-700 dark:text-slate-200 mb-1">
+                {t('valuationBasis')}
+              </legend>
+              {settings.language === 'zh-TW' && (
+                  <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                    設置完成自己的 Gemini API Key 後一般會員只能使用綠色的「綜合市場因素」，
+                    <button 
+                        type="button" 
+                        onClick={() => setSettingsModalOpen(true)} 
+                        className="text-blue-600 hover:underline font-medium"
+                    >
+                        升級為付費會員
+                    </button>
+                    始得開啟全部反灰鎖定功能。
+                  </p>
+              )}
+           </div>
+          <div className="flex flex-wrap gap-2">
             {valuationReferences.map((ref) => {
                 const isRestricted = restrictedReferences.includes(ref.value);
-                const isDisabled = isRestricted && !userHasPermission;
+                const isFreeTierOption = ref.value === 'comprehensiveMarketFactors';
+                const isDisabledByPerms = isRestricted && !userHasPermission;
+                const isDisabled = !hasApiKey || isDisabledByPerms;
+                
+                let tooltip = '';
+                if (!hasApiKey) {
+                    tooltip = t('valuationDisabledTooltip');
+                } else if (isDisabledByPerms) {
+                    tooltip = t('premiumFeatureTooltip');
+                }
+
+                const isSelected = reference === ref.value;
 
                 return (
-                  <div key={ref.value} title={isDisabled ? '此功能僅限付費會員及管理員使用' : ''}>
+                  <div key={ref.value} title={tooltip} className="relative">
                     <input
                       type="radio"
                       id={`ref-${ref.value}`}
                       name="valuation-reference"
                       value={ref.value}
-                      checked={reference === ref.value}
+                      checked={isSelected}
                       onChange={(e) => setReference(e.target.value)}
                       className="sr-only"
                       disabled={isLoading || isDisabled}
@@ -197,14 +272,15 @@ export const SearchForm: React.FC<SearchFormProps> = ({ onSearch, onLocationSele
                     <label
                       htmlFor={`ref-${ref.value}`}
                       className={`
-                        block w-full text-center px-3 py-2 border rounded-lg text-sm font-medium transition-all
-                        ${
-                          reference === ref.value
-                            ? 'bg-blue-600 border-blue-600 text-white shadow-md'
-                            : 'bg-white border-gray-300 text-gray-700'
+                        block px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 cursor-pointer select-none border
+                        ${isSelected && hasApiKey
+                            ? isFreeTierOption 
+                                ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white border-transparent shadow-lg shadow-emerald-500/30'
+                                : 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-transparent shadow-lg shadow-blue-500/30'
+                            : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600 hover:border-slate-300 dark:hover:border-slate-500 hover:bg-slate-50 dark:hover:bg-slate-700'
                         }
-                        ${!isDisabled ? 'cursor-pointer hover:bg-gray-100 hover:border-gray-400' : ''}
-                        ${isLoading || isDisabled ? 'cursor-not-allowed opacity-50' : ''}
+                        ${isDisabled ? 'opacity-50 cursor-not-allowed grayscale' : ''}
+                        ${isSelected ? 'scale-105' : ''}
                       `}
                     >
                       {ref.label}
@@ -216,91 +292,127 @@ export const SearchForm: React.FC<SearchFormProps> = ({ onSearch, onLocationSele
         </fieldset>
 
         {/* Custom Inputs for '真實坪數' */}
-        {reference === '真實坪數' && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 bg-gray-50 border border-gray-200 rounded-lg">
+        {reference === 'actualPingSize' && hasApiKey && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-5 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl animate-fade-in">
             <div>
-              <label htmlFor="custom-size" className="block text-sm font-medium text-gray-600 mb-1">
-                自訂實際坪數
+              <label htmlFor="custom-size" className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">
+                {t('customActualPingSize')}
               </label>
               <input
                 id="custom-size"
                 type="number"
                 value={customSize}
                 onChange={(e) => setCustomSize(e.target.value)}
-                placeholder="例如：32.5"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                placeholder={t('enterPingSizePlaceholder')}
+                className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-900 dark:text-white"
                 disabled={isLoading}
                 step="0.01"
               />
             </div>
             <div>
-              <label htmlFor="custom-price" className="block text-sm font-medium text-gray-600 mb-1">
-                自訂參考單價 (萬/坪)
+              <label htmlFor="custom-price" className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">
+                {t('customReferenceUnitPrice')}
               </label>
               <input
                 id="custom-price"
                 type="number"
                 value={customPricePerPing}
                 onChange={(e) => setCustomPricePerPing(e.target.value)}
-                placeholder="例如：85"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                placeholder={t('enterUnitPricePlaceholder')}
+                className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-900 dark:text-white"
                 disabled={isLoading}
                 step="0.1"
               />
             </div>
             <div className="sm:col-span-2">
-               <label htmlFor="custom-floor" className="block text-sm font-medium text-gray-600 mb-1">
-                  自訂樓層 (選填)
+               <label htmlFor="custom-floor" className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">
+                  {t('customFloor')}
               </label>
               <input
                   id="custom-floor"
                   type="text"
                   value={customFloor}
                   onChange={(e) => setCustomFloor(e.target.value)}
-                  placeholder="例如: 8樓 / 15樓"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                  placeholder={t('enterFloorPlaceholder')}
+                  className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-900 dark:text-white"
                   disabled={isLoading}
               />
             </div>
-             <p className="text-xs text-gray-500 sm:col-span-2">
-                若填寫此區塊，AI 將優先使用您提供的數值進行估算。若留白，則會依據附近行情自動估算。
+             <p className="text-xs text-slate-500 dark:text-slate-400 sm:col-span-2 italic">
+                {t('customInputNote')}
             </p>
           </div>
         )}
 
+        {/* Custom Request Input for '自訂估價指令' */}
+        {reference === 'customValuation' && hasApiKey && (
+            <div className="p-5 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl animate-fade-in">
+                 <label htmlFor="custom-request" className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">
+                    {t('customValuationLabel')}
+                 </label>
+                 <textarea
+                    id="custom-request"
+                    value={customRequest}
+                    onChange={(e) => setCustomRequest(e.target.value)}
+                    placeholder={t('customValuationPlaceholder')}
+                    className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-900 dark:text-white h-24 resize-none"
+                    disabled={isLoading}
+                 />
+            </div>
+        )}
 
         {/* Submit Button */}
         <button
           type="submit"
-          disabled={isLoading || !address.trim()}
-          className="w-full flex justify-center items-center gap-2 px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-all duration-150 transform hover:scale-105"
+          disabled={isLoading || !address.trim() || !hasApiKey}
+          title={!hasApiKey ? t('valuationDisabledTooltip') : ''}
+          className="w-full group relative flex justify-center items-center gap-2 px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold text-lg rounded-2xl shadow-xl shadow-blue-500/30 hover:shadow-blue-500/50 disabled:bg-slate-300 disabled:cursor-not-allowed disabled:shadow-none transition-all duration-300 hover:-translate-y-1 overflow-hidden"
         >
+            <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300 ease-out blur-md"></div>
           {isLoading ? (
             <>
               <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
-              估價中...
+              {t('valuating')}
             </>
           ) : (
             <>
-              <SparklesIcon className="h-5 w-5" />
-              AI智慧為您估價參考
+              <SparklesIcon className="h-6 w-6 animate-pulse" />
+              {t('aiValuationButton')}
             </>
           )}
         </button>
       </div>
+      {showApiKeyWarning && (
+        <div className="mt-6 animate-fade-in text-sm text-amber-800 bg-amber-50 dark:bg-amber-900/20 dark:text-amber-300 border border-amber-200 dark:border-amber-700 rounded-xl p-4 flex justify-between items-center shadow-sm" role="alert">
+            {currentUser?.role === '管理員' || currentUser?.role === '付費用戶' ? (
+                <div>
+                    <span className="font-medium">{t('apiKeyWarning')}</span>
+                    <button 
+                        type="button" 
+                        onClick={() => setSettingsModalOpen(true)} 
+                        className="font-bold underline hover:text-amber-900 dark:hover:text-amber-200 ml-2"
+                    >
+                        {t('clickHereToSettings')}
+                    </button>
+                </div>
+            ) : (
+                <span>{t('adminApiKeySetupRequired')}</span>
+            )}
+        </div>
+      )}
       {geolocationError && (
-        <div className="mt-4 text-sm text-red-700 bg-red-100 border border-red-200 rounded-lg p-3 flex justify-between items-center transition-opacity duration-300" role="alert">
-          <span>{geolocationError}</span>
+        <div className="mt-6 animate-fade-in text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl p-4 flex justify-between items-center shadow-sm" role="alert">
+          <span className="font-medium">{geolocationError}</span>
           <button 
             type="button" 
             onClick={() => setGeolocationError(null)} 
-            className="text-red-800 hover:text-red-900 focus:outline-none focus:ring-2 focus:ring-red-500 rounded-full p-1 -mr-1"
-            aria-label="關閉錯誤訊息"
+            className="text-red-800 hover:text-red-900 focus:outline-none focus:ring-2 focus:ring-red-500 rounded-full p-1"
+            aria-label={t('closeErrorMessage')}
           >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>

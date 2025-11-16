@@ -1,3 +1,4 @@
+
 import React, { createContext, useState, useEffect, ReactNode } from 'react';
 import type { User, UserRole } from '../types';
 
@@ -6,11 +7,10 @@ interface AuthContextType {
   users: User[];
   login: (email: string, password: string) => boolean;
   logout: () => void;
-  register: (details: { email: string; password: string; name: string; phone: string; role: '一般用戶' | '付費用戶' }) => { success: boolean; message: string };
-  loginWithProvider: (email: string) => void;
-  addUser: (user: User) => { success: boolean; message: string };
-  updateUser: (email: string, data: Partial<User>) => { success: boolean; message: string };
-  deleteUser: (email: string) => void;
+  register: (details: { email: string; password: string; name: string; phone: string; }) => { success: boolean; messageKey: string };
+  addUser: (user: User) => { success: boolean; messageKey: string };
+  updateUser: (email: string, data: Partial<User>) => { success: boolean; messageKey: string };
+  deleteUser: (email: string) => { success: boolean; messageKey: string };
   isLoginModalOpen: boolean;
   setLoginModalOpen: (isOpen: boolean) => void;
   isAdminPanelOpen: boolean;
@@ -69,89 +69,64 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     localStorage.removeItem('app_session');
   };
 
-  const register = (details: { email: string; password: string; name: string; phone: string; role: '一般用戶' | '付費用戶' }): { success: boolean; message: string } => {
+  const register = (details: { email: string; password: string; name: string; phone: string; }): { success: boolean; messageKey: string } => {
     if (users.some(u => u.email === details.email)) {
-      return { success: false, message: '此電子郵件已被註冊。' };
+      return { success: false, messageKey: 'registrationFailed' };
     }
     if (!details.name.trim()) {
-        return { success: false, message: '請輸入姓名。' };
+        return { success: false, messageKey: 'missingRequiredFields' };
     }
     if (!details.phone.trim()) {
-        return { success: false, message: '請輸入連絡電話。' };
+        return { success: false, messageKey: 'missingRequiredFields' };
     }
 
     const newUser: User = { 
         email: details.email, 
         password: details.password, 
-        role: details.role,
+        role: '一般用戶', // Default all new users to 'General Member'
         name: details.name,
         phone: details.phone
     };
     const updatedUsers = [...users, newUser];
     setUsers(updatedUsers);
     localStorage.setItem('app_users', JSON.stringify(updatedUsers));
-    // Automatically log in after registration
-    login(details.email, details.password);
-    return { success: true, message: '註冊成功！' };
-  };
-  
-  const loginWithProvider = (email: string) => {
-    const existingUser = users.find(u => u.email === email);
-    if (existingUser) {
-        // Log in existing user
-        setCurrentUser(existingUser);
-        localStorage.setItem('app_session', JSON.stringify(existingUser));
-        setLoginModalOpen(false);
-    } else {
-        // Register and log in new user
-        const newUser: User = { 
-            email, 
-            // Social logins don't have a password in this system
-            password: `social_login_${Date.now()}`, 
-            role: '一般用戶' 
-        };
-        const updatedUsers = [...users, newUser];
-        setUsers(updatedUsers);
-        localStorage.setItem('app_users', JSON.stringify(updatedUsers));
-        setCurrentUser(newUser);
-        localStorage.setItem('app_session', JSON.stringify(newUser));
-        setLoginModalOpen(false);
-    }
+    
+    // Do not auto-login here. The modal will handle the transition to success message.
+    return { success: true, messageKey: 'registrationSuccess' };
   };
 
-
-  const addUser = (user: User): { success: boolean; message: string } => {
+  const addUser = (user: User): { success: boolean; messageKey: string } => {
     if (users.some(u => u.email === user.email)) {
-      return { success: false, message: '此電子郵件已被註冊。' };
+      return { success: false, messageKey: 'registrationFailed' };
     }
     if (!user.password || user.password.length < 6) {
-        return { success: false, message: '密碼長度至少需要6個字元。' };
+        return { success: false, messageKey: 'passwordMinLength' };
     }
     if (!user.name || !user.phone) {
-      return { success: false, message: '請填寫姓名與聯絡電話。' };
+      return { success: false, messageKey: 'missingRequiredFields' };
     }
     const updatedUsers = [...users, user];
     setUsers(updatedUsers);
     localStorage.setItem('app_users', JSON.stringify(updatedUsers));
-    return { success: true, message: '用戶新增成功。' };
+    return { success: true, messageKey: 'addUserSuccess' };
   };
 
-  const updateUser = (email: string, data: Partial<User>): { success: boolean; message: string } => {
+  const updateUser = (email: string, data: Partial<User>): { success: boolean; messageKey: string } => {
     let updatedUsers = [...users];
     const userIndex = updatedUsers.findIndex(u => u.email === email);
     if (userIndex === -1) {
-        return { success: false, message: '找不到該用戶。' };
+        return { success: false, messageKey: 'userNotFound' };
     }
 
     // Prevent admin from removing their own admin rights if they are the only admin
     const adminCount = users.filter(u => u.role === '管理員').length;
     if (currentUser?.email === email && data.role !== '管理員' && adminCount <= 1) {
-      return { success: false, message: '無法移除最後一位管理員的權限。' };
+      return { success: false, messageKey: 'cannotDeleteLastAdmin' };
     }
     
     // If password is being updated, check its length
     if (data.password && data.password.length > 0 && data.password.length < 6) {
-        return { success: false, message: '新密碼長度至少需要6個字元。' };
+        return { success: false, messageKey: 'passwordMinLength' };
     }
 
     const updatedUser = { ...updatedUsers[userIndex], ...data };
@@ -171,33 +146,31 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         localStorage.setItem('app_session', JSON.stringify(updatedUser));
     }
 
-    return { success: true, message: '用戶更新成功。' };
+    return { success: true, messageKey: 'updateUserSuccess' };
   };
 
-  const deleteUser = (email: string) => {
+  const deleteUser = (email: string): { success: boolean; messageKey: string } => {
     // Prevent deleting the currently logged-in user
     if (currentUser?.email === email) {
-      alert("無法刪除您自己。");
-      return;
+      return { success: false, messageKey: 'cannotDeleteSelf' };
     }
 
     // Prevent deleting the last admin
     const userToDelete = users.find(u => u.email === email);
     const adminCount = users.filter(u => u.role === '管理員').length;
     if (userToDelete?.role === '管理員' && adminCount <= 1) {
-      alert("無法刪除最後一位管理員。");
-      return;
+      return { success: false, messageKey: 'cannotDeleteLastAdmin' };
     }
 
     const updatedUsers = users.filter(u => u.email !== email);
     setUsers(updatedUsers);
     localStorage.setItem('app_users', JSON.stringify(updatedUsers));
+    return { success: true, messageKey: 'deleteUserSuccess' };
   };
 
   return (
     <AuthContext.Provider value={{ 
         currentUser, users, login, logout, register, 
-        loginWithProvider,
         addUser, updateUser, deleteUser,
         isLoginModalOpen, setLoginModalOpen,
         isAdminPanelOpen, setAdminPanelOpen

@@ -1,6 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useContext } from 'react';
 import { CalculatorIcon } from './icons/CalculatorIcon';
 import { XMarkIcon } from './icons/XMarkIcon';
+import { SettingsContext } from '../contexts/SettingsContext';
+import { formatDisplayPrice } from '../utils';
 
 interface MortgageCalculatorProps {
   estimatedPrice: number;
@@ -8,18 +10,19 @@ interface MortgageCalculatorProps {
   onClose: () => void;
 }
 
-const formatCurrency = (amount: number) => {
-  return new Intl.NumberFormat('zh-TW', {
-    style: 'currency',
-    currency: 'TWD',
-    minimumFractionDigits: 0,
-  }).format(amount);
-};
-
 export const MortgageCalculator: React.FC<MortgageCalculatorProps> = ({ estimatedPrice, isOpen, onClose }) => {
+  const { settings, t } = useContext(SettingsContext);
   const [downPayment, setDownPayment] = useState(0);
   const [interestRate, setInterestRate] = useState(2.1);
   const [loanTerm, setLoanTerm] = useState(30);
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat(settings.language.replace('_', '-'), {
+      style: 'currency',
+      currency: 'TWD',
+      minimumFractionDigits: 0,
+    }).format(amount);
+  };
 
   useEffect(() => {
     // Set default down payment to 20% of the estimated price when it changes
@@ -65,9 +68,9 @@ export const MortgageCalculator: React.FC<MortgageCalculatorProps> = ({ estimate
         <header className="flex items-center justify-between p-4 border-b border-gray-200 flex-shrink-0">
             <h2 id="mortgage-calculator-title" className="text-xl font-bold text-gray-800 flex items-center gap-2">
                 <CalculatorIcon className="h-6 w-6 text-blue-600" />
-                房貸月付金試算
+                {t('mortgageCalculator')}
             </h2>
-            <button onClick={onClose} className="p-2 text-gray-500 hover:text-gray-800 rounded-full hover:bg-gray-100 transition-colors" aria-label="關閉視窗">
+            <button onClick={onClose} className="p-2 text-gray-500 hover:text-gray-800 rounded-full hover:bg-gray-100 transition-colors" aria-label={t('close')}>
                 <XMarkIcon className="h-6 w-6" />
             </button>
         </header>
@@ -76,7 +79,7 @@ export const MortgageCalculator: React.FC<MortgageCalculatorProps> = ({ estimate
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 items-end">
             <div>
               <label htmlFor="downPayment" className="block text-sm font-medium text-gray-600 mb-1">
-                自備款 (元)
+                {t('downPayment')}
               </label>
               <input
                 type="number"
@@ -89,7 +92,7 @@ export const MortgageCalculator: React.FC<MortgageCalculatorProps> = ({ estimate
             </div>
             <div>
               <label htmlFor="interestRate" className="block text-sm font-medium text-gray-600 mb-1">
-                年利率 (%)
+                {t('interestRate')}
               </label>
               <input
                 type="number"
@@ -102,7 +105,7 @@ export const MortgageCalculator: React.FC<MortgageCalculatorProps> = ({ estimate
             </div>
             <div>
               <label htmlFor="loanTerm" className="block text-sm font-medium text-gray-600 mb-1">
-                貸款年限 (年)
+                {t('loanTerm')}
               </label>
               <input
                 type="number"
@@ -117,24 +120,24 @@ export const MortgageCalculator: React.FC<MortgageCalculatorProps> = ({ estimate
           
           <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="bg-gray-100 p-3 rounded-lg border border-gray-200">
-                <span className="text-xs text-gray-500">房屋總價</span>
-                <p className="text-lg font-semibold text-gray-800">{formatCurrency(estimatedPrice)}</p>
+                <span className="text-xs text-gray-500">{t('totalHousePrice')}</span>
+                <p className="text-lg font-semibold text-gray-800">{formatDisplayPrice(estimatedPrice, t, settings.language)}</p>
             </div>
             <div className="bg-gray-100 p-3 rounded-lg border border-gray-200">
-                <span className="text-xs text-gray-500">貸款總額</span>
+                <span className="text-xs text-gray-500">{t('totalLoanAmount')}</span>
                 <p className="text-lg font-semibold text-gray-800">{formatCurrency(loanAmount)}</p>
             </div>
           </div>
 
           <div className="mt-4 bg-gray-100 p-4 rounded-lg flex flex-col sm:flex-row justify-between items-center border-2 border-gray-200">
-            <span className="text-base font-medium text-gray-600">預估每月還款</span>
+            <span className="text-base font-medium text-gray-600">{t('estimatedMonthlyPayment')}</span>
             <p className="text-3xl font-bold text-blue-600">
               {formatCurrency(monthlyPayment)}
             </p>
           </div>
 
           <p className="text-xs text-gray-400 mt-3 text-center sm:text-left">
-              * 此為本息平均攤還法估算結果，實際貸款條件與金額請以銀行公告為準。
+              {t('calculatorDisclaimer')}
           </p>
         </main>
       </div>

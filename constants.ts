@@ -1,4 +1,8 @@
-import type { Property, Filters } from './types';
+
+import type { Property, Filters, Language } from './types';
+
+export const APP_VERSION = "v.1116_beta003";
+export const APP_RELEASE_DATE = "2025-05-26";
 
 export const mockProperties: Property[] = [
   {
@@ -67,13 +71,53 @@ export const mockProperties: Property[] = [
   },
 ];
 
+export const getMockProperties = (language: Language): Property[] => {
+    const baseProperties: Property[] = JSON.parse(JSON.stringify(mockProperties));
+
+    if (language === 'en') {
+        baseProperties[0].address = 'No. 79-1, Section 2, Roosevelt Rd, Da\'an District, Taipei City';
+        baseProperties[0].floor = '9F / 12F';
+        baseProperties[1].address = 'No. 100, Section 1, Wenhua Rd, Banqiao District, New Taipei City';
+        baseProperties[1].floor = '4F / 5F';
+        baseProperties[2].address = 'No. 301, Section 3, Taiwan Blvd, Xitun District, Taichung City';
+        baseProperties[2].floor = '11F / 22F';
+        baseProperties[3].address = 'No. 777, Bo\'ai 2nd Rd, Zuoying District, Kaohsiung City';
+        baseProperties[3].floor = '1-4F / 4F';
+        return baseProperties;
+    }
+    if (language === 'zh-CN') {
+        baseProperties[0].address = '台北市大安区罗斯福路二段79之1号';
+        baseProperties[0].floor = '9楼 / 12楼';
+        baseProperties[1].address = '新北市板桥区文化路一段100号';
+        baseProperties[1].floor = '4楼 / 5楼';
+        baseProperties[2].address = '台中市西屯区台湾大道三段301号';
+        baseProperties[2].floor = '11楼 / 22楼';
+        baseProperties[3].address = '高雄市左营区博爱二路777号';
+        baseProperties[3].floor = '1-4楼 / 4楼';
+        return baseProperties;
+    }
+    if (language === 'ja') {
+        baseProperties[0].address = '台北市大安区羅斯福路二段79之1号';
+        baseProperties[0].floor = '9階 / 12階';
+        baseProperties[1].address = '新北市板橋区文化路一段100号';
+        baseProperties[1].floor = '4階 / 5階';
+        baseProperties[2].address = '台中市西屯区台湾大道三段301号';
+        baseProperties[2].floor = '11階 / 22階';
+        baseProperties[3].address = '高雄市左営区博愛二路777号';
+        baseProperties[3].floor = '1-4階 / 4階';
+        return baseProperties;
+    }
+    
+    return baseProperties; // For zh-TW
+};
+
 export const initialFilters: Filters = {
-  type: '華廈',
+  type: 'all',
   price: 'all',
   bedrooms: 'all',
   yearBuilt: 'all',
   pricePerSqm: 'all',
-  size: '0-30',
+  size: 'all',
 };
 
 export const PROPERTY_TYPES = ['公寓', '電梯大樓', '透天厝', '華廈'];

@@ -1,8 +1,10 @@
-import React from 'react';
+import React, { useContext } from 'react';
 import type { Property, ValuationReport, ComparisonValuationState } from '../types';
 import { XMarkIcon } from './icons/XMarkIcon';
 import { TrashIcon } from './icons/TrashIcon';
 import { XCircleIcon } from './icons/XCircleIcon';
+import { SettingsContext } from '../contexts/SettingsContext';
+import { formatDisplayPrice, formatUnitPrice } from '../utils';
 
 
 interface ComparisonViewProps {
@@ -12,15 +14,6 @@ interface ComparisonViewProps {
   onRemove: (property: Property) => void;
   onClear: () => void;
 }
-
-const formatCurrency = (amount: number | undefined) => {
-  if (amount === undefined || amount === null) return 'N/A';
-  return new Intl.NumberFormat('zh-TW', {
-    style: 'currency',
-    currency: 'TWD',
-    minimumFractionDigits: 0,
-  }).format(amount);
-};
 
 const ComparisonSkeleton: React.FC = () => (
     <div className="space-y-4 p-4 animate-pulse">
@@ -36,22 +29,23 @@ const ComparisonSkeleton: React.FC = () => (
 );
 
 export const ComparisonView: React.FC<ComparisonViewProps> = ({ properties, valuations, onClose, onRemove, onClear }) => {
+  const { settings, t } = useContext(SettingsContext);
   
-  const renderRow = (title: string, dataExtractor: (report: ValuationReport) => React.ReactNode | string | string[]) => {
+  const renderRow = (titleKey: string, dataExtractor: (report: ValuationReport, prop: Property) => React.ReactNode | string | string[]) => {
     return (
       <tr>
-        <td className="p-3 font-semibold text-gray-600 bg-gray-100 border-b border-r border-gray-200 sticky left-0">{title}</td>
+        <td className="p-3 font-semibold text-gray-600 bg-gray-100 border-b border-r border-gray-200 sticky left-0">{t(titleKey)}</td>
         {properties.map(prop => {
           const valuationState = valuations[prop.id];
           return (
             <td key={prop.id} className="p-3 border-b border-gray-200 align-top">
               {valuationState?.report ? (
-                Array.isArray(dataExtractor(valuationState.report)) ? (
+                Array.isArray(dataExtractor(valuationState.report, prop)) ? (
                   <ul className="list-disc list-inside space-y-1">
-                    {(dataExtractor(valuationState.report) as string[]).map((item, index) => <li key={index}>{item}</li>)}
+                    {(dataExtractor(valuationState.report, prop) as string[]).map((item, index) => <li key={index}>{item}</li>)}
                   </ul>
                 ) : (
-                  dataExtractor(valuationState.report)
+                  dataExtractor(valuationState.report, prop)
                 )
               ) : null}
             </td>
@@ -68,14 +62,14 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ properties, valu
         onClick={e => e.stopPropagation()}
       >
         <header className="flex items-center justify-between p-4 border-b border-gray-200 flex-shrink-0">
-          <h2 className="text-xl font-bold text-gray-800">房產比較報告</h2>
+          <h2 className="text-xl font-bold text-gray-800">{t('propertyComparisonReport')}</h2>
           <div className="flex items-center gap-2">
             <button 
                 onClick={onClear} 
                 className="flex items-center gap-2 px-3 py-2 bg-red-50 text-red-700 text-sm font-semibold rounded-lg shadow-sm hover:bg-red-100 transition-colors"
             >
                 <TrashIcon className="h-5 w-5" />
-                全部清除
+                {t('clearAll')}
             </button>
             <button onClick={onClose} className="p-2 text-gray-500 hover:text-gray-800 rounded-full hover:bg-gray-100 transition-colors">
                 <XMarkIcon className="h-6 w-6" />
@@ -87,15 +81,21 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ properties, valu
           <table className="w-full text-sm border-collapse">
             <thead className="sticky top-0 bg-white z-10">
               <tr>
-                <th className="p-3 text-left font-semibold text-gray-600 bg-gray-100 border-b-2 border-gray-300 border-r border-gray-200 w-1/6 sticky left-0">項目</th>
+                <th className="p-3 text-left font-semibold text-gray-600 bg-gray-100 border-b-2 border-gray-300 border-r border-gray-200 w-1/6 sticky left-0">{t('item')}</th>
                 {properties.map(prop => {
                   const valuationState = valuations[prop.id];
+                  const details = [
+                      prop.district,
+                      prop.type ? t(prop.type) : null,
+                      prop.size ? `${(prop.size / 3.30579).toFixed(1)} ${t('pings')}` : null
+                  ].filter(Boolean).join(' | ');
+
                   return (
                     <th key={prop.id} className="p-3 border-b-2 border-gray-300 w-1/4 relative">
                       <button 
                         onClick={() => onRemove(prop)}
                         className="absolute top-1 right-1 bg-white/50 rounded-full text-gray-500 hover:text-red-500 opacity-50 hover:opacity-100 transition-all"
-                        title="移除"
+                        title={t('remove')}
                       >
                         <XCircleIcon className="h-5 w-5" />
                       </button>
@@ -105,7 +105,7 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ properties, valu
                          <div className="text-left font-normal">
                            <img src={prop.imageUrl} alt={prop.address} className="h-24 w-full object-cover rounded-md mb-2"/>
                            <p className="font-semibold text-gray-800">{prop.address}</p>
-                           <p className="text-xs text-gray-500">{`${prop.district} | ${prop.type} | ${(prop.size / 3.30579).toFixed(1)} 坪`}</p>
+                           <p className="text-xs text-gray-500">{details}</p>
                          </div>
                       )}
                     </th>
@@ -114,15 +114,19 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ properties, valu
               </tr>
             </thead>
             <tbody>
-              {renderRow('估計總價', report => <span className="font-bold text-blue-600">{formatCurrency(report.estimatedPrice)}</span>)}
-              {renderRow('每坪單價', report => formatCurrency(report.pricePerSqm * 3.30579))}
-              {renderRow('信心指數', report => report.confidence)}
-              {renderRow('市場總結', report => <p className="leading-relaxed">{report.marketSummary}</p>)}
-              {renderRow('優點', report => report.pros)}
-              {renderRow('缺點', report => report.cons)}
-              {renderRow('鄰近學區', report => report.amenitiesAnalysis.schools)}
-              {renderRow('交通便利', report => report.amenitiesAnalysis.transport)}
-              {renderRow('生活採買', report => report.amenitiesAnalysis.shopping)}
+              {renderRow('estimatedTotalPrice', report => <span className="font-bold text-blue-600">{formatDisplayPrice(report.estimatedPrice, t, settings.language)}</span>)}
+              {renderRow('unitPricePerPing', (report, prop) => {
+                  const pings = report.inferredDetails?.sizePing ?? (prop.size ? prop.size / 3.30579 : 0);
+                  const pricePerPingInWan = pings > 0 ? (report.estimatedPrice / pings) / 10000 : 0;
+                  return formatUnitPrice(pricePerPingInWan, t, settings.language);
+              })}
+              {renderRow('confidenceIndex', report => report.confidence)}
+              {renderRow('marketSummary', report => <p className="leading-relaxed">{report.marketSummary}</p>)}
+              {renderRow('advantages', report => report.pros)}
+              {renderRow('disadvantages', report => report.cons)}
+              {renderRow('nearbySchools', report => report.amenitiesAnalysis.schools)}
+              {renderRow('transportationConvenience', report => report.amenitiesAnalysis.transport)}
+              {renderRow('shoppingAndGroceries', report => report.amenitiesAnalysis.shopping)}
             </tbody>
           </table>
         </div>
