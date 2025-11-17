@@ -3,21 +3,63 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "main": "public/electron.js",
+  "homepage": "./",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview"
+    "build": "vite build",
+    "preview": "vite preview",
+    "react-build": "vite build",
+    "electron-start": "wait-on http://localhost:5173 && electron .",
+    "electron-dev": "concurrently \"npm run dev\" \"npm run electron-start\"",
+    "electron-build": "npm run react-build && electron-builder",
+    "windows-exe": "npm run electron-build"
   },
   "dependencies": {
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "@google/genai": "^1.27.0"
+    "@google/generative-ai": "^1.27.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.66",
     "@types/react-dom": "^18.2.22",
+    "@vitejs/plugin-react": "^4.2.1",
     "typescript": "^5.2.2",
     "vite": "^5.2.0",
-    "@vitejs/plugin-react": "^4.2.1"
+    "electron": "^27.0.0",
+    "electron-builder": "^24.6.4",
+    "wait-on": "^7.0.1",
+    "concurrently": "^8.2.2",
+    "electron-is-dev": "^3.0.0"
+  },
+  "build": {
+    "appId": "com.mazylab.aihouseprice",
+    "productName": "AI 房產估價師",
+    "files": [
+      "dist/**/*",
+      "public/electron.js",
+      "public/preload.js",
+      "node_modules/**/*"
+    ],
+    "directories": {
+      "buildResources": "assets"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "AI 房產估價師"
+    }
   }
 }
