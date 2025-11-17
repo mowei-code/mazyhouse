@@ -530,7 +530,7 @@ const AppContent: React.FC = () => {
                     {t('loginOrRegister')}
                 </button>
                 <p style={{ fontSize: '10px' }} className="mt-6 text-slate-400 dark:text-slate-500">
-                    &copy; Mazylab studio 2025... {APP_VERSION}
+                    &copy; Mazylab studio {APP_VERSION}
                 </p>
             </div>
         </main>

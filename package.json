@@ -1,24 +1,23 @@
 {
   "name": "ai-property-appraiser",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.1.17",
   "type": "module",
-  "main": "public/electron.js",
-  "homepage": "./",
+  "main": "electron/main.cjs",
+  "description": "AI 房產估價師桌面版",
+  "author": "Mazylab",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "tsc && vite build",
     "preview": "vite preview",
-    "react-build": "vite build",
-    "electron-start": "wait-on http://localhost:5173 && electron .",
-    "electron-dev": "concurrently \"npm run dev\" \"npm run electron-start\"",
-    "electron-build": "npm run react-build && electron-builder",
-    "windows-exe": "npm run electron-build"
+    "electron:dev": "concurrently -k \"cross-env BROWSER=none npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:build": "npm run build && electron-builder"
   },
   "dependencies": {
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "@google/generative-ai": "^1.27.0"
+    "@google/genai": "^1.27.0",
+    "electron-squirrel-startup": "^1.0.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.66",
@@ -26,40 +25,35 @@
     "@vitejs/plugin-react": "^4.2.1",
     "typescript": "^5.2.2",
     "vite": "^5.2.0",
-    "electron": "^27.0.0",
-    "electron-builder": "^24.6.4",
-    "wait-on": "^7.0.1",
+    "electron": "^29.1.0",
+    "electron-builder": "^24.13.3",
     "concurrently": "^8.2.2",
-    "electron-is-dev": "^3.0.0"
+    "wait-on": "^7.2.0",
+    "cross-env": "^7.0.3"
   },
   "build": {
-    "appId": "com.mazylab.aihouseprice",
-    "productName": "AI 房產估價師",
+    "appId": "com.mazylab.aiproperty",
+    "productName": "AI房產估價師",
+    "directories": {
+      "output": "dist_electron"
+    },
     "files": [
       "dist/**/*",
-      "public/electron.js",
-      "public/preload.js",
-      "node_modules/**/*"
+      "electron/**/*",
+      "package.json"
     ],
-    "directories": {
-      "buildResources": "assets"
-    },
     "win": {
       "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ]
+        "nsis"
+      ],
+      "icon": "public/favicon.ico"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "AI 房產估價師"
+      "shortcutName": "AI房產估價師"
     }
   }
 }

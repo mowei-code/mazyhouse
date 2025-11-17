@@ -196,7 +196,7 @@ export const LoginModal: React.FC = () => {
                             id="name"
                             value={name}
                             onChange={e => setName(e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
                             required
                             />
                         </div>
@@ -209,7 +209,7 @@ export const LoginModal: React.FC = () => {
                             id="phone"
                             value={phone}
                             onChange={e => setPhone(e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
                             required
                             />
                         </div>
@@ -224,7 +224,7 @@ export const LoginModal: React.FC = () => {
                         id="email"
                         value={email}
                         onChange={e => setEmail(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
                         required
                         />
                     </div>
@@ -237,7 +237,7 @@ export const LoginModal: React.FC = () => {
                         id="password"
                         value={password}
                         onChange={e => setPassword(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
                         required
                         minLength={isRegister ? 6 : undefined}
                         />
@@ -256,7 +256,7 @@ export const LoginModal: React.FC = () => {
                                     value={captcha}
                                     onChange={e => setCaptcha(e.target.value)}
                                     placeholder={t('captchaPlaceholder')}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
                                     required
                                     maxLength={6}
                                 />

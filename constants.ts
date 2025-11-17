@@ -1,8 +1,8 @@
 
 import type { Property, Filters, Language } from './types';
 
-export const APP_VERSION = "v.1116_beta003";
-export const APP_RELEASE_DATE = "2025-05-26";
+export const APP_VERSION = "v.1117_beta001";
+export const APP_RELEASE_DATE = "2025-05-27";
 
 export const mockProperties: Property[] = [
   {
